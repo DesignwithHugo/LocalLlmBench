@@ -459,7 +459,7 @@ def pros_cons(m, chat):
 def scatter_svg(chat, par, path):
     pts = [(m["name"], m.get("tg_d8k") or m.get("tg_short"), m.get("quality"), m["key"] in par) for m in chat]
     pts = [p for p in pts if p[1] and p[2] is not None]
-    W, H, P = 900, 560, 70
+    W, H, P = 1000, 640, 70
     if not pts:
         return False
     xmax = max(p[1] for p in pts) * 1.1
@@ -485,7 +485,8 @@ def scatter_svg(chat, par, path):
         col = "#e07a1f" if (on or name in picked) else "#d9d9d9"
         r = 7 if (on or name in picked) else 4.5
         s.append(f'<circle cx="{X(x):.1f}" cy="{Y(y):.1f}" r="{r}" fill="{col}"' + (' stroke="#222" stroke-width="2"' if name in picked else "") + "/>")
-    s += svg_labels([(label_name(n), X(x), Y(y)) for n, x, y, on in pts if on or n in picked], W, color="#e07a1f")
+    lab = [(n, x, y) for n, x, y, on in pts if n in picked or (on and y >= 80)]
+    s += svg_labels([(label_name(n), X(x), Y(y)) for n, x, y in lab], W, color="#e07a1f", dots=[(X(x), Y(y)) for _, x, y in lab])
     s.append(f'<text x="{W-P}" y="{H-P-8}" text-anchor="end" fill="#e07a1f">orange = no other model is both faster and better; black ring = a pick</text>')
     s.append("</svg>")
     open(path, "w").write("\n".join(s))
@@ -496,27 +497,35 @@ def label_name(n):
     return re.sub(r" \((GGUF|MLX)\)$", "", n)
 
 
-def svg_labels(items, W, font_w=7.4, line_h=15, color="#222"):
-    """Place text labels next to points without overlapping each other (greedy: shift down, then try the left side)."""
-    boxes, out = [], []
+def svg_labels(items, W, font_w=7.6, line_h=16, color="#222", dots=()):
+    """Place text labels next to points without overlapping each other or the highlighted dots. Tries right, then left,
+    shifting down then up; draws a thin leader line when the label had to move away from its point."""
+    boxes = [(x - 9, y - 9, x + 9, y + 9) for x, y in dots]
+    out = []
+    def clash(b):
+        return any(not (b[2] < o[0] or b[0] > o[2] or b[3] < o[1] or b[1] > o[3]) for o in boxes)
     for text, x, y in sorted(items, key=lambda t: (t[2], t[1])):
         w = len(text) * font_w
         placed = None
-        for side in (1, -1):
-            lx = x + 10 if side > 0 else x - 10 - w
-            if lx < 4 or lx + w > W - 4:
-                continue
-            for k in range(0, 6):
-                ly = y - 8 + k * line_h
-                box = (lx, ly - 11, lx + w, ly + 3)
-                if not any(not (box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3]) for b in boxes):
-                    placed = (lx, ly); break
+        for k in (0, 1, -1, 2, -2, 3, -3, 4):
+            for side in (1, -1):
+                lx = x + 11 if side > 0 else x - 11 - w
+                ly = y + 5 + k * line_h
+                if lx < 4 or lx + w > W - 4:
+                    continue
+                box = (lx - 2, ly - 12, lx + w + 2, ly + 4)
+                if not clash(box):
+                    placed = (lx, ly, side, k); break
             if placed:
                 break
         if not placed:
-            placed = (x + 10, y - 8)
-        boxes.append((placed[0], placed[1] - 11, placed[0] + w, placed[1] + 3))
-        out.append(f'<text x="{placed[0]:.1f}" y="{placed[1]:.1f}" fill="{color}" font-weight="600">{text}</text>')
+            placed = (x + 11, y + 5, 1, 0)
+        lx, ly, side, k = placed
+        boxes.append((lx - 2, ly - 12, lx + w + 2, ly + 4))
+        if k != 0:  # leader from the dot to the label's near edge
+            ex = lx - 3 if side > 0 else lx + w + 3
+            out.append(f'<line x1="{x:.1f}" y1="{y:.1f}" x2="{ex:.1f}" y2="{ly - 4:.1f}" stroke="{color}" stroke-width="0.8" opacity="0.6"/>')
+        out.append(f'<text x="{lx:.1f}" y="{ly:.1f}" fill="{color}" font-weight="600" font-size="14">{text}</text>')
     return out
 
 
@@ -527,7 +536,7 @@ def agent_svg(models, path):
     pts = [p for p in pts if p[1] and p[2] is not None]
     if len(pts) < 2:
         return False
-    W, H, P = 900, 560, 70
+    W, H, P = 1000, 640, 70
     lo, hi = math.log10(max(1, min(p[1] for p in pts) / 1.5)), math.log10(max(p[1] for p in pts) * 1.5)
     ymin = max(0, min(p[2] for p in pts) - 10); ymax = min(100, max(p[2] for p in pts) + 5)
     X = lambda v: P + (W - 2 * P) * (math.log10(v) - lo) / max(1e-9, hi - lo)
@@ -553,7 +562,8 @@ def agent_svg(models, path):
         lab = name in picked or name in front
         s.append(f'<circle cx="{X(x):.1f}" cy="{Y(y):.1f}" r="{7 if lab else 4.5}" fill="{"#2f8f6b" if lab else "#d9d9d9"}"'
                  + (' stroke="#222" stroke-width="2"' if name in picked else "") + "/>")
-    s += svg_labels([(label_name(n), X(x), Y(y)) for n, x, y in pts if n in picked or n in front], W, color="#2f8f6b")
+    lab = [(n, x, y) for n, x, y in pts if n in picked or (n in front and y >= 80)]
+    s += svg_labels([(label_name(n), X(x), Y(y)) for n, x, y in lab], W, color="#2f8f6b", dots=[(X(x), Y(y)) for _, x, y in lab])
     s.append(f'<text x="{W-P}" y="{H-P-8}" text-anchor="end" fill="#2f8f6b">dark = no other model is both faster and better; black ring = a pick</text>')
     s.append("</svg>")
     open(path, "w").write("\n".join(s))
