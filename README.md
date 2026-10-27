@@ -57,6 +57,10 @@ You can stop after step 2 and still have a full agent leaderboard. Models up to 
 
 Run it, then open a pull request adding `results/<your-chip>-<ram>gb/` with the contents of your `report/community/` folder (leave out the harness zip). Numbers from other Macs are the most useful thing this project can collect. Model requests and grader bugs go in Issues; every agent trace is in `results.jsonl`, so a wrong grade can be checked by anyone.
 
+## How this was built
+
+The harness, the graders, the report and this repository were written and operated by Claude (Opus 5.5 and Fable 5.1) working with the author over a couple of weeks: the author chose the models, set the rules and approved every download and deletion; Claude wrote and debugged the code, watched the runs and fixed grader mistakes as they turned up. The scenarios in the real-world tier are reconstructions of things assistants got wrong in actual use. There will be mistakes left; every agent trace is in `results.jsonl`, so please open an issue if a grade looks wrong.
+
 ## License
 
 MIT.
