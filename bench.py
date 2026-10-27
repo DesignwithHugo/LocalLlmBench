@@ -203,7 +203,15 @@ def heavy_loop():
 
 
 def check_pause():
-    """Called between tests. Raises Paused if the user is back or the window closed."""
+    """Called between tests. Raises Paused if the user is back or the window closed; exits cleanly if data/STOP exists."""
+    if os.path.exists(os.path.join(DATA, "STOP")):
+        log("STOP file found: unloading and exiting after the current test")
+        L.unload_all()
+        try:
+            os.remove(os.path.join(DATA, "STOP"))
+        except OSError:
+            pass
+        sys.exit(0)
     if ARGS.now:
         if CFG.get("heavy_use_pause") and HEAVY["on"]:
             raise Paused("heavy use of the Mac")

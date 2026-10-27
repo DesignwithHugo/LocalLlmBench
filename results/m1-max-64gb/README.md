@@ -1,4 +1,4 @@
-# M1 Max 64 GB: 52 local models in LM Studio, 47 of them also tested as agents (October 2026)
+# M1 Max 64 GB: 54 local models in LM Studio, 48 of them also tested as agents (October 2026)
 
 Hardware: Apple M1 Max (32-core GPU), 64 GB, macOS 27.0.1. LM Studio 0.4.26; engines used: MLX 1.13.1, llama.cpp 2.61.0, llama.cpp 2.62.0, llama.cpp 2.63.0, llama.cpp 2.64.0.
 
@@ -8,7 +8,7 @@ Picks from the tables below. Memory is at a 64k context; real cases is the tier 
 
 - **Best overall:** qwen3.8-27b Q4_K_M (GGUF) (99% quality, 100% agent, 16.9 tok/s)
 - **Best everyday pick (40+ tok/s):** ornith-1.5-35b-a3b (GGUF) (94% quality, 98% agent, 94% real cases, 52.4 tok/s)
-- **Spanish writing:** ternary-bonsai-2-27b (MLX) (writing 96%)
+- **Spanish writing:** ternary-bonsai-2-27b (MLX) (writing 95%)
 - **Coding:** lfm2.5-24b-a2b (GGUF) (coding 100%)
 - **Agents (Hermes, OpenCode, n8n style):** qwen3.8-27b Q4_K_M (GGUF) (agent score 100%, 51 s per task, 100% of tasks solved in all 3 runs)
 - **Snappy agent (30 s or less per task):** sage-a1.5 Q4_K_M (GGUF) (agent score 99%, 15 s per task, 100% of tasks solved in all 3 runs)
@@ -19,13 +19,13 @@ Picks from the tables below. Memory is at a 64k context; real cases is the tier 
 
 | Model | Mem @64k GB | Real cases % | Agent % | Quality % | tok/s |
 |---|---:|---:|---:|---:|---:|
-| **qwen3.8-27b Q4_K_M (GGUF)** | 15.7 | **98** | 100 | 99 | 17 |
-| qwen3.8-27b Q8_0 (GGUF) | 46.3 | 97 | **100** | 99 | 18 |
+| **qwen3.8-27b Q4_K_M (GGUF)** | 15.7 | **98** | 100 | **99** | 17 |
+| qwen3.8-27b Q8_0 (GGUF) | 46.3 | 97 | **100** | **99** | 18 |
 | **ornith-1.5-35b-a3b (GGUF)** | 25.6 | 94 | 98 | 94 | **52** |
-| qwen3.8-27b (MLX) | 22.5 | 92 | **100** | 99 | 18 |
+| qwen3.8-27b (MLX) | 22.5 | 92 | **100** | 98 | 18 |
 | mimo-v2.6-distill-qwen-9b Q8_0 (GGUF) | 16.6 | 91 | 95 | 84 | 34 |
 | **mimo-v2.6-distill-qwen-9b Q4_K_S (GGUF)** | **10.6** | 90 | 92 | 86 | 39 |
-| **ternary-bonsai-2-27b (MLX)** | 12.0 | 90 | **100** | 96 | 18 |
+| **ternary-bonsai-2-27b (MLX)** | 12.0 | 90 | **100** | 95 | 18 |
 | underdog-saluki-27b-1.0 (GGUF) | 14.7 | 88 | **100** | 94 | 14 |
 | holo4-27b (GGUF) | 28.0 | 87 | **100** | 92 | 13 |
 | kolibri-1 (GGUF) | 43.1 | 85 | 93 | **98** | 43 |
@@ -36,11 +36,11 @@ Scores are out of 100. Differences under about 3 points are noise.
 
 ## Findings
 
-- Hardest agent tasks: clarify (57% of runs solved); plan_meeting (65% of runs solved); long_order (69% of runs solved).
-- 5 of 47 models obeyed a prompt injection hidden in an email at least once (kolibri-1 (GGUF), agents-a1-4b (GGUF), gpt-oss-20b (GGUF), underdog-woof-4b-1.1 (MLX), k2-horizon-3.7b (GGUF)).
+- Hardest agent tasks: clarify (56% of runs solved); plan_meeting (65% of runs solved); long_order (69% of runs solved).
+- 5 of 48 models obeyed a prompt injection hidden in an email at least once (kolibri-1 (GGUF), agents-a1-4b (GGUF), gpt-oss-20b (GGUF), underdog-woof-4b-1.1 (MLX), k2-horizon-3.7b (GGUF)).
 - Best agent score: qwen3.8-27b Q4_K_M (GGUF) (100%, 51 s per task). Best under 30 s per task: sage-a1.5 Q4_K_M (GGUF) (99%, 15 s).
-- Real-world failure tier: best qwen3.8-27b Q4_K_M (GGUF) (98%); 45 of 47 models made at least one serious slip (something hard to undo, or a false claim); hardest case: invoice_crosscheck (13% of runs solved). Biggest drops from the main agent score: gemma-4-26b-a4b (GGUF) (98 to 71), sage-a1.5 Q4_K_M (GGUF) (99 to 74), spark-x2.6-4b (GGUF) (97 to 72).
-- Prompt cache: on GGUF models a follow-up turn on the same long agent prefix started 152x faster than the cold start (median of 40 models).
+- Real-world failure tier: best qwen3.8-27b Q4_K_M (GGUF) (98%); 46 of 48 models made at least one serious slip (something hard to undo, or a false claim); hardest case: invoice_crosscheck (13% of runs solved). Biggest drops from the main agent score: gemma-4-26b-a4b (GGUF) (98 to 71), sage-a1.5 Q4_K_M (GGUF) (99 to 74), spark-x2.6-4b (GGUF) (97 to 72).
+- Prompt cache: on GGUF models a follow-up turn on the same long agent prefix started 152x faster than the cold start (median of 41 models).
 - Prompt cache: on MLX models a follow-up turn on the same long agent prefix started 41x faster than the cold start (median of 7 models).
 
 ## Agent leaderboard
@@ -76,6 +76,7 @@ Scores are out of 100. Differences under about 3 points are noise.
 | kolibri-1 (GGUF) | GGUF Q3_K_M | 93 | 94% | 24 | **100%** | 0/3 |
 | **mimo-v2.6-distill-qwen-9b Q4_K_S (GGUF)** | GGUF Q4_K_S | 92 | 81% | 14 | **100%** | 3/3 |
 | ternary-bonsai-27b (MLX) | MLX 2bit | 92 | 81% | 47 | 98% | **3/3** |
+| ling-3.0-tiny (GGUF) | GGUF Q8_0 | 92 | 75% | 10 | **100%** | 3/3 |
 | agents-a1-4b (GGUF) | GGUF Q8_0 | 91 | 81% | 15 | **100%** | 2/3 |
 | laguna-xs-2.1 (GGUF) | GGUF Q4_K_M | 89 | 75% | 10 | **100%** | 3/3 |
 | nanbeige_nanbeige4.2-3b (GGUF) | GGUF Q4_K_M | 88 | 88% | 31 | 99% | **3/3** |
@@ -139,6 +140,7 @@ Scores are out of 100. Differences under about 3 points are noise.
 | agents-a1-4b (GGUF) | 71 | 40% | 6/30 | 51 | 82 | 60 | 95 | 20 |  |
 | ternary-bonsai-27b (MLX) | 69 | 40% | 6/30 | 73 | 62 | 57 | 85 | 43 |  |
 | gemma-4-e4b-qat (GGUF) | 68 | 20% | **3/30** | 74 | 53 | 73 | 75 | 19 |  |
+| ling-3.0-tiny (GGUF) | 67 | 40% | 6/30 | 62 | 66 | 50 | 95 | 15 |  |
 | gpt-oss-20b (GGUF) | 66 | 40% | **2/30** | 78 | 72 | 23 | 85 | 10 |  |
 | underdog-woof-4b-1.1 (MLX) | 65 | 40% | 6/30 | 51 | 68 | 50 | 95 | 11 |  |
 | lfm2.5-2.6b (GGUF) | 61 | 30% | 7/30 | 40 | 67 | 60 | 83 | 16 |  |
@@ -155,14 +157,14 @@ Scores are out of 100. Differences under about 3 points are noise.
 
 ## Quantization: same model, different sizes
 
-Each quant is tested as its own model with the same tests and settings. Bigger quants need more memory and generate more slowly; the question is whether they also decide better. The same model's agent score moves about 2 points between passes, and single tasks flip more than that, so read small gaps as ties.
+Each quant is tested as its own model with the same tests and settings. Bigger quants need more memory and generate more slowly; the question is whether they also decide better. The same model's agent score moves about 3 points between passes, and single tasks flip more than that, so read small gaps as ties.
 
 | Model | Format | Quant | File (GB) | Memory @64k (GB) | Gen tok/s @8k | Quality % | Agent % | Real cases % | Serious slips | s per task |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | flint | GGUF | Q4_K_M | 24.2 | 28.5 | **60.0** | 95 | 97 | 75 | 5/30 | 19 |
 | flint | GGUF | Q4_K_XL | 25.1 | 29.4 | 50.6 | **96** | 95 | 85 | 3/30 | 19 |
 | flint | GGUF | Q6_K | 32.7 | 37.3 | 53.8 | **96** | 97 | 78 | 4/30 | 21 |
-| lfm2.5-24b-a2b | MLX | 4bit | 13.6 | 19.0 | **84.1** | 68* | - | - | - | - |
+| lfm2.5-24b-a2b | MLX | 4bit | 13.6 | 19.0 | **84.1** | 67* | - | - | - | - |
 | **lfm2.5-24b-a2b** | GGUF | Q4_K_XL | 14.9 | 14.0 | **86.0** | 97 | 96 | 76 | 5/30 | 12 |
 | **mimo-v2.6-distill-qwen-9b** | GGUF | Q4_K_S | 6.4 | **10.6** | 39.3 | 86 | 92 | 90 | 2/30 | 14 |
 | mimo-v2.6-distill-qwen-9b | GGUF | Q8_0 | 10.5 | 16.6 | 33.6 | 84 | 95 | **91** | 2/30 | 16 |
@@ -170,41 +172,42 @@ Each quant is tested as its own model with the same tests and settings. Bigger q
 | mistral-small-4-119b-2603 | GGUF | IQ2_M | 39.3 | 43.1 | 27.5 | 84 | 63 | 54 | 9/30 | 10 |
 | nanbeige4.3-33b | GGUF | Q6_K | - | 41.1 | 9.5 | 68 | - | - | - | - |
 | nanbeige4.3-33b | GGUF | IQ4_XS | 20.3 | 31.1 | 9.8 | 92* | 94 | 83 | **2/30** | 137 |
-| **qwen3.8-27b (Bonsai 2)** | MLX | 2bit | 8.6 | 12.0 | 18.4 | 96 | **100** | 90 | 3/30 | 60 |
+| **qwen3.8-27b (Bonsai 2)** | MLX | 2bit | 8.6 | 12.0 | 18.4 | 95 | **100** | 90 | 3/30 | 60 |
 | qwen3.8-27b (Saluki) | GGUF | IQ2 | 8.8 | 14.7 | 13.7 | 94 | **100** | 88 | 2/30 | 73 |
-| qwen3.8-27b | MLX | 4bit | 16.1 | 22.5 | 18.4 | **99** | 100 | 92 | 1/30 | 50 |
+| qwen3.8-27b | MLX | 4bit | 16.1 | 22.5 | 18.4 | 98 | **100** | 92 | 1/30 | 50 |
 | **qwen3.8-27b** | GGUF | Q4_K_M | 18.4 | 15.7 | 16.9 | **99** | 100 | **98** | **0/30** | 51 |
 | qwen3.8-27b | GGUF | Q8_0 | 30.0 | 46.3 | 17.7 | **99** | 100 | 97 | **0/30** | 51 |
-| **sage-a1.5** | GGUF | Q4_K_M | 22.6 | 25.6 | 64.1 | **99*** | 99 | 74 | 3/30 | 15 |
+| **sage-a1.5** | GGUF | Q4_K_M | 22.6 | 25.6 | 64.1 | **98*** | 99 | 74 | 3/30 | 15 |
 | sage-a1.5 | GGUF | Q8_0 | 37.8 | 41.3 | **50.8** | 88* | 94 | 73 | 2/30 | 17 |
 
 ## Speed, memory and context
 
 | Model | Format | Mem @64k GB | Gen t/s @8k | TTFT @8k s | Prefill t/s @32k | Max ctx loaded | Quality % | Agent % | Real cases % |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| muse-glimmer (GGUF) | GGUF Q4_K_M | 23.4 | 12.7 | 70.08 | 113 | 128k | **99** | 96 | 84 |
 | **qwen3.8-27b Q4_K_M (GGUF)** | GGUF Q4_K_M | 15.7 | 16.9 | 68.85 | 108 | 256k | **99** | 100 | **98** |
 | qwen3.8-27b Q8_0 (GGUF) | GGUF Q8_0 | 46.3 | 17.7 | 62.04 | 118 | 96k | **99** | 100 | 97 |
-| muse-glimmer (GGUF) | GGUF Q4_K_M | 23.4 | 12.7 | 70.08 | 113 | 128k | **99** | 96 | 84 |
-| qwen3.5-9b (GGUF) | GGUF Q4_K_M | 10.8 | 38.1 | 18.86 | 391 | 256k | **99** | 94 | 75 |
-| qwen3.8-27b (MLX) | MLX 4bit | 22.5 | 18.4 | 78.04 | 101 | 256k | **99** | 100 | 92 |
-| **sage-a1.5 Q4_K_M (GGUF)** | GGUF Q4_K_M | 25.6 | 64.1 | 11.57 | 551 | 256k | **99*** | 99 | 74 |
-| holo4-35b-a3b (GGUF) | GGUF Q4_K_M | 25.1 | 62.1 | 10.91 | 589 | 256k | **98** | 94 | 77 |
+| ornith-1.5-122b (GGUF) | GGUF IQ1_M | 45.7 | 20.1 | 45.40 | 152 | 256k | **99** | - | - |
+| qwen3.8-27b (MLX) | MLX 4bit | 22.5 | 18.4 | 78.04 | 101 | 256k | 98 | **100** | 92 |
 | kolibri-1 (GGUF) | GGUF Q3_K_M | 43.1 | 43.1 | 14.68 | 426 | 256k | **98** | 93 | 85 |
+| holo4-35b-a3b (GGUF) | GGUF Q4_K_M | 25.1 | 62.1 | 10.91 | 589 | 256k | **98** | 94 | 77 |
 | gemma-4-e4b-qat (GGUF) | GGUF Q4_0 | 10.1 | 60.4 | 14.30 | 282 | 128k | **98** | 83 | 68 |
 | gemma-4-26b-a4b (GGUF) | GGUF Q4_K_M | 24.1 | 50.6 | 19.95 | 188 | 256k | **98** | 98 | 71 |
+| **sage-a1.5 Q4_K_M (GGUF)** | GGUF Q4_K_M | 25.6 | 64.1 | 11.57 | 551 | 256k | **98*** | 99 | 74 |
 | gemma-4-12b-qat (GGUF) | GGUF Q4_0 | 18.0 | 31.9 | 42.63 | 102 | 256k | **98*** | 97 | 82 |
+| qwen3.5-9b (GGUF) | GGUF Q4_K_M | 10.8 | 38.1 | 18.86 | 391 | 256k | **98** | 94 | 75 |
 | ternary-bonsai-27b (MLX) | MLX 2bit | 11.9 | 26.4 | 57.97 | 135 | 256k | **98** | 92 | 69 |
 | nvidia-nemotron-3.5-bolt-e4b (GGUF) | GGUF Q4_K_S | 9.9 | 49.8 | 16.92 | 247 | 64k | **98** | 74 | 60 |
 | gpt-oss-20b (GGUF) | GGUF MXFP4 | 17.6 | 66.5 | 11.92 | 511 | 128k | **98** | 88 | 66 |
 | **lfm2.5-24b-a2b (GGUF)** | GGUF Q4_K_XL | 14.0 | 86.0 | 8.00 | 843 | 128k | **97** | 96 | 76 |
-| flint Q6_K (GGUF) | GGUF Q6_K | 37.3 | 53.8 | 12.22 | 485 | 256k | 96 | **97** | 78 |
+| flint Q6_K (GGUF) | GGUF Q6_K | 37.3 | 53.8 | 12.22 | 485 | 256k | **96** | 97 | 78 |
 | flint Q4_K_XL (GGUF) | GGUF Q4_K_XL | 29.4 | 50.6 | 11.52 | 511 | 256k | **96** | 95 | 85 |
-| **ternary-bonsai-2-27b (MLX)** | MLX 2bit | 12.0 | 18.4 | 72.50 | 100 | 256k | 96 | **100** | 90 |
-| gemma-4-12b (GGUF) | GGUF Q8_0 | 16.5 | 22.3 | 44.79 | 101 | 192k | 96 | **97** | 80 |
+| gemma-4-12b (GGUF) | GGUF Q8_0 | 16.5 | 22.3 | 44.79 | 101 | 192k | **96** | 97 | 80 |
+| **ternary-bonsai-2-27b (MLX)** | MLX 2bit | 12.0 | 18.4 | 72.50 | 100 | 256k | 95 | **100** | 90 |
 | flint Q4_K_M (GGUF) | GGUF Q4_K_M | 28.5 | 60.0 | 11.36 | 512 | 256k | 95 | **97** | 75 |
-| ternary-bonsai-2-9b (MLX) | MLX 2bit | **4.9** | 55.7 | 20.79 | 347 | 256k | 95* | 84 | 60 |
-| qwen3.6-35b-a3b (GGUF) | GGUF Q4_K_M | 26.6 | 61.2 | 11.25 | 561 | 256k | 94 | **95** | 75 |
 | **ornith-1.5-35b-a3b (GGUF)** | GGUF Q4_K_M | 25.6 | 52.4 | 11.76 | 528 | 256k | 94 | 98 | **94** |
+| qwen3.6-35b-a3b (GGUF) | GGUF Q4_K_M | 26.6 | 61.2 | 11.25 | 561 | 256k | **94** | 95 | 75 |
+| ternary-bonsai-2-9b (MLX) | MLX 2bit | **4.9** | 55.7 | 20.79 | 347 | 256k | 94* | 84 | 60 |
 | underdog-saluki-27b-1.0 (GGUF) | GGUF IQ2 | 14.7 | 13.7 | 65.39 | 114 | 256k | 94 | **100** | 88 |
 | mellum2.1-12b-a2.5b-thinking (GGUF) | GGUF Q4_K_M | 11.3 | 74.1 | 7.82 | 819 | 128k | 93 | **97** | 75 |
 | holo4-27b (GGUF) | GGUF Q4_K_M | 28.0 | 13.1 | 66.62 | 113 | 256k | 92 | **100** | 87 |
@@ -213,27 +216,28 @@ Each quant is tested as its own model with the same tests and settings. Bigger q
 | qwen3-vl-4b (MLX) | MLX 4bit | **4.3** | 67.3 | 14.86 | 321 | 256k | 90 | 66 | 58 |
 | k2-horizon-3.7b (GGUF) | GGUF Q4_K_M | 8.1 | 50.1 | 14.44 | 297 | **512k** | 89* | 75 | 71 |
 | hy-memory-30b-a3b (GGUF) | GGUF Q4_K_M | 22.3 | 47.1 | 15.89 | 250 | **256k** | 89 | 79 | 82 |
-| sage-a1.5 Q8_0 (GGUF) | GGUF Q8_0 | 41.3 | 50.8 | 10.77 | 567 | 256k | 88* | **94** | 73 |
 | minicpm5-2b (GGUF) | GGUF Q8_0 | **5.1** | 74.8 | 7.23 | 544 | 128k | 88 | 86 | 74 |
-| lfm2.5-2.6b (GGUF) | GGUF Q8_0 | 5.5 | 90.1 | **5.96** | 1,138 | 128k | 88* | 83 | 61 |
+| sage-a1.5 Q8_0 (GGUF) | GGUF Q8_0 | 41.3 | 50.8 | 10.77 | 567 | 256k | 88* | **94** | 73 |
 | agents-a1-4b (GGUF) | GGUF Q8_0 | **7.7** | 52.1 | 9.55 | 672 | 256k | 87* | 91 | 71 |
+| lfm2.5-2.6b (GGUF) | GGUF Q8_0 | 5.5 | 90.1 | 5.96 | **1,138** | 128k | 87* | 83 | 61 |
 | **mimo-v2.6-distill-qwen-9b Q4_K_S (GGUF)** | GGUF Q4_K_S | 10.6 | 39.3 | 18.29 | 397 | 256k | 86 | 92 | **90** |
 | mistral-small-4-119b-2603 IQ1_M (GGUF) | GGUF IQ1_M | 37.6 | 27.5 | 34.00 | 109 | **1024k** | 85 | 72 | 56 |
 | mimo-v2.6-distill-qwen-9b Q8_0 (GGUF) | GGUF Q8_0 | 16.6 | 33.6 | 16.33 | 437 | 256k | 84 | 95 | **91** |
 | underdog-woof-4b-1.1 (MLX) | MLX 4bit | **3.3** | 83.5 | 12.69 | 595 | 256k | 84* | 86 | 65 |
-| **lfm2.5-8b-a1b (GGUF)** | GGUF Q4_K_M | 7.7 | 129.0 | **4.72** | 1,436 | 125k | 84 | 58 | 48 |
 | mistral-small-4-119b-2603 IQ2_M (GGUF) | GGUF IQ2_M | 43.1 | 27.5 | 34.79 | 110 | **1024k** | 84 | 63 | 54 |
 | laguna-xs-2.1 (GGUF) | GGUF Q4_K_M | 26.3 | 55.2 | 13.01 | 462 | **256k** | 83 | 89 | 74 |
+| **lfm2.5-8b-a1b (GGUF)** | GGUF Q4_K_M | 7.7 | 129.0 | **4.72** | 1,436 | 125k | 83 | 58 | 48 |
+| ling-3.0-tiny (GGUF) | GGUF Q8_0 | 9.8 | 66.6 | **5.66** | 746 | 128k | 82* | 92 | 67 |
 | spark-x2.6-4b (GGUF) | GGUF Q8_0 | 8.4 | 56.2 | 9.80 | 635 | **1024k** | 81* | 97 | 72 |
-| minicpm-v-4.7-35b-a3b (GGUF) | GGUF Q4_K_S | 23.9 | 60.0 | 10.61 | **592** | 256k | 79 | - | - |
-| lfm2.5-vl-3b (GGUF) | GGUF Q8_0 | 5.1 | 81.0 | **6.01** | - | 32k | 74 | 49 | 39 |
-| d1-3b (MLX) | MLX 4bit | **3.3** | 141.3 | 6.22 | - | 32k | 69 | 46 | 34 |
+| minicpm-v-4.7-35b-a3b (GGUF) | GGUF Q4_K_S | 23.9 | 60.0 | 10.61 | 592 | **256k** | 79 | - | - |
+| nvidia-nemotron-3.5-bolt-74b-a9b (GGUF) | GGUF Q3_K_XL | 44.3 | 21.8 | 32.53 | 250 | **256k** | 75* | - | - |
+| lfm2.5-vl-3b (GGUF) | GGUF Q8_0 | **5.1** | 81.0 | 6.01 | - | 32k | 74 | 49 | 39 |
+| d1-3b (MLX) | MLX 4bit | **3.3** | 141.3 | 6.22 | - | 32k | 68 | 46 | 34 |
 | nanbeige4.3-33b Q6_K (GGUF) | GGUF Q6_K | 41.1 | 9.5 | 98.71 | 64 | 64k | 68 | - | - |
-| lfm2.5-24b-a2b (MLX) | MLX 4bit | 19.0 | 84.1 | 8.92 | **866** | 128k | 68* | - | - |
+| lfm2.5-24b-a2b (MLX) | MLX 4bit | 19.0 | 84.1 | 8.92 | **866** | 128k | 67* | - | - |
 | minicpm-v-4.7-1b (GGUF) | GGUF Q6_K | 3.4 | 131.9 | **2.29** | **2,455** | 256k | 61* | - | - |
-| lfm2.5-1.2b-thinking (GGUF) | GGUF Q8_0 | 3.7 | **173.3** | 2.74 | 2,181 | 125k | 61 | 45 | 25 |
-| lfm2.5-1.2b (GGUF) | GGUF Q8_0 | 3.7 | 169.9 | **2.68** | 2,180 | 125k | 58 | 38 | 27 |
-| nvidia-nemotron-3.5-bolt-74b-a9b (GGUF) | GGUF Q3_K_XL | 44.3 | 22.1 | 31.79 | 250 | **256k** | - | - | - |
+| lfm2.5-1.2b-thinking (GGUF) | GGUF Q8_0 | 3.7 | **173.3** | 2.74 | 2,181 | 125k | 60 | 45 | 25 |
+| lfm2.5-1.2b (GGUF) | GGUF Q8_0 | 3.7 | 169.9 | **2.68** | 2,180 | 125k | 57 | 38 | 27 |
 
 \* Ran out of output tokens before answering on some quality tasks (those score 0). Installed models were rerun with a 16,384-token cap (8,192 for vision); deleted models only had the earlier 4,096 cap, so their quality is understated.
 
@@ -252,7 +256,7 @@ Agent apps resend the same long prefix every turn (system prompt + tool list). C
 | spark-x2.6-4b (GGUF) | llama.cpp 2.63.0 | **17.9** | 0.21 | 160x |
 | flint Q4_K_M (GGUF) | llama.cpp 2.63.0 | 19.2 | 0.23 | **171x** |
 | flint Q6_K (GGUF) | llama.cpp 2.63.0 | 20.4 | 0.24 | **172x** |
-| flint Q4_K_XL (GGUF) | llama.cpp 2.63.0 | **19.1** | 0.25 | 160x |
+| flint Q4_K_XL (GGUF) | llama.cpp 2.63.0 | 19.1 | 0.25 | **160x** |
 | mistral-small-4-119b-2603 IQ1_M (GGUF) | llama.cpp 2.63.0 | 66.8 | 0.45 | **504x** |
 | mellum2.1-12b-a2.5b-thinking (GGUF) | llama.cpp 2.63.0 | **15.4** | 0.28 | 115x |
 | laguna-xs-2.1 (GGUF) | llama.cpp 2.63.0 | 25.2 | 0.32 | **183x** |
@@ -265,6 +269,7 @@ Agent apps resend the same long prefix every turn (system prompt + tool list). C
 | gpt-oss-20b (GGUF) | llama.cpp 2.63.0 | **16.3** | 0.33 | 99x |
 | qwen3.6-35b-a3b (GGUF) | llama.cpp 2.61.0 | **18.9** | 0.34 | 108x |
 | mimo-v2.6-distill-qwen-9b Q8_0 (GGUF) | llama.cpp 2.63.0 | 26.8 | 0.32 | 152x |
+| ling-3.0-tiny (GGUF) | llama.cpp 2.64.0 | **12.2** | 0.30 | 68x |
 | nvidia-nemotron-3.5-bolt-e4b (GGUF) | llama.cpp 2.63.0 | 28.4 | 0.21 | 153x |
 | kolibri-1 (GGUF) | llama.cpp 2.63.0 | 29.2 | 0.44 | 156x |
 | mimo-v2.6-distill-qwen-9b Q4_K_S (GGUF) | llama.cpp 2.61.0 | 29.6 | 0.32 | 152x |
