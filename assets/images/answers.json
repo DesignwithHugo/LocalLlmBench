@@ -1,0 +1,18 @@
+{
+ "ocr_es": "La retícula es la estructura invisible que ordena una página. Ayuda a decidir dónde van los títulos, las imágenes y los márgenes, y le da al lector un ritmo predecible. Un buen diseñador la respeta, pero también sabe cuándo romperla con intención.",
+ "chart_es": {
+  "cat": "Abril",
+  "val": 73
+ },
+ "ui_es": [
+  "Subir archivo",
+  "Ver comentarios",
+  "Compartir enlace",
+  "Eliminar proyecto"
+ ],
+ "shapes": {
+  "triangles": 7,
+  "circles": 5,
+  "squares": 4
+ }
+}

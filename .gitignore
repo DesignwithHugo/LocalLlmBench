@@ -1,0 +1,7 @@
+data/
+report/
+lmstudio_token.txt
+config.json
+__pycache__/
+.DS_Store
+*.command

@@ -1,0 +1,11 @@
+{
+  "night_start_hour": 23,
+  "night_end_hour": 8,
+  "idle_to_start_s": 900,
+  "ctx_standard": 65536,
+  "max_fill_cap_tokens": 131072,
+  "download_wait_max_min": 0,
+  "linger_after_done_h": 6,
+  "priority_small_gb": 0,
+  "repo_url": "https://github.com/DesignwithHugo/LocalLlmBench"
+}

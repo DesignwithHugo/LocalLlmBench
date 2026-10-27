@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="-apple-system,Helvetica,Arial" font-size="13">
+<rect width="900" height="560" fill="#ffffff"/>
+<text x="70" y="32" font-size="17" font-weight="600" fill="#222">Agent score vs time per task (M1 Max 64 GB, 16 tool-use tasks)</text>
+<line x1="70" y1="490" x2="830" y2="490" stroke="#999"/><line x1="70" y1="70" x2="70" y2="490" stroke="#999"/>
+<text x="450.0" y="535" text-anchor="middle" fill="#444">Median seconds per agent task (log scale, lower is better)</text>
+<text x="20" y="280.0" transform="rotate(-90 20 280.0)" text-anchor="middle" fill="#444">Agent score (%)</text>
+<text x="70" y="508" text-anchor="middle" fill="#666">1</text>
+<line x1="70" y1="70" x2="70" y2="490" stroke="#f1f1f1"/>
+<text x="169" y="508" text-anchor="middle" fill="#666">2</text>
+<line x1="169" y1="70" x2="169" y2="490" stroke="#f1f1f1"/>
+<text x="300" y="508" text-anchor="middle" fill="#666">5</text>
+<line x1="300" y1="70" x2="300" y2="490" stroke="#f1f1f1"/>
+<text x="399" y="508" text-anchor="middle" fill="#666">10</text>
+<line x1="399" y1="70" x2="399" y2="490" stroke="#f1f1f1"/>
+<text x="498" y="508" text-anchor="middle" fill="#666">20</text>
+<line x1="498" y1="70" x2="498" y2="490" stroke="#f1f1f1"/>
+<text x="628" y="508" text-anchor="middle" fill="#666">50</text>
+<line x1="628" y1="70" x2="628" y2="490" stroke="#f1f1f1"/>
+<text x="727" y="508" text-anchor="middle" fill="#666">100</text>
+<line x1="727" y1="70" x2="727" y2="490" stroke="#f1f1f1"/>
+<text x="826" y="508" text-anchor="middle" fill="#666">200</text>
+<line x1="826" y1="70" x2="826" y2="490" stroke="#f1f1f1"/>
+<text x="62" y="494.0" text-anchor="end" fill="#666">28</text>
+<line x1="70" y1="490.0" x2="830" y2="490.0" stroke="#eee"/>
+<text x="62" y="410.0" text-anchor="end" fill="#666">42</text>
+<line x1="70" y1="406.0" x2="830" y2="406.0" stroke="#eee"/>
+<text x="62" y="326.0" text-anchor="end" fill="#666">57</text>
+<line x1="70" y1="322.0" x2="830" y2="322.0" stroke="#eee"/>
+<text x="62" y="242.00000000000003" text-anchor="end" fill="#666">71</text>
+<line x1="70" y1="238.00000000000003" x2="830" y2="238.00000000000003" stroke="#eee"/>
+<text x="62" y="158.0" text-anchor="end" fill="#666">86</text>
+<line x1="70" y1="154.0" x2="830" y2="154.0" stroke="#eee"/>
+<text x="62" y="74.0" text-anchor="end" fill="#666">100</text>
+<line x1="70" y1="70.0" x2="830" y2="70.0" stroke="#eee"/>
+<circle cx="630.4" cy="70.0" r="7" fill="#2f8f6b"/>
+<text x="640.4" y="62.0" fill="#222">qwen3.8-27b Q4_K_M (GGUF)</text>
+<circle cx="632.4" cy="70.0" r="7" fill="#2f8f6b"/>
+<text x="642.4" y="62.0" fill="#222">qwen3.8-27b Q8_0 (GGUF)</text>
+<circle cx="731.1" cy="90.6" r="7" fill="#2f8f6b"/>
+<text x="741.1" y="82.6" fill="#222">muse-glimmer (GGUF)</text>
+<circle cx="514.9" cy="102.7" r="7" fill="#2f8f6b"/>
+<text x="524.9" y="94.7" fill="#222">qwen3.5-9b (GGUF)</text>
+<circle cx="627.2" cy="70.0" r="7" fill="#2f8f6b"/>
+<text x="637.2" y="62.0" fill="#222">qwen3.8-27b (MLX)</text>
+<circle cx="454.3" cy="77.3" r="7" fill="#2f8f6b"/>
+<text x="464.3" y="69.3" fill="#222">sage-a1.5 Q4_K_M (GGUF)</text>
+<circle cx="440.3" cy="106.9" r="7" fill="#2f8f6b"/>
+<text x="450.3" y="98.9" fill="#222">holo4-35b-a3b (GGUF)</text>
+<circle cx="525.2" cy="111.2" r="7" fill="#2f8f6b"/>
+<text x="535.2" y="103.2" fill="#222">kolibri-1 (GGUF)</text>
+<circle cx="517.3" cy="167.4" r="7" fill="#2f8f6b"/>
+<text x="527.3" y="159.4" fill="#222">gemma-4-e4b-qat (GGUF)</text>
+<circle cx="434.4" cy="82.9" r="7" fill="#2f8f6b"/>
+<text x="444.4" y="74.9" fill="#222">gemma-4-26b-a4b (GGUF)</text>
+<circle cx="517.4" cy="89.4" r="7" fill="#2f8f6b"/>
+<text x="527.4" y="81.4" fill="#222">gemma-4-12b-qat (GGUF)</text>
+<circle cx="619.2" cy="116.0" r="7" fill="#2f8f6b"/>
+<text x="629.2" y="108.0" fill="#222">ternary-bonsai-27b (MLX)</text>
+<circle cx="476.5" cy="220.3" r="7" fill="#2f8f6b"/>
+<text x="486.5" y="212.3" fill="#222">nvidia-nemotron-3.5-bolt-e4b (GGUF)</text>
+<circle cx="415.2" cy="141.4" r="7" fill="#2f8f6b"/>
+<text x="425.2" y="133.4" fill="#222">gpt-oss-20b (GGUF)</text>
+<circle cx="426.9" cy="95.4" r="7" fill="#2f8f6b"/>
+<text x="436.9" y="87.4" fill="#222">lfm2.5-24b-a2b (GGUF)</text>
+<circle cx="503.2" cy="88.2" r="7" fill="#2f8f6b"/>
+<text x="513.2" y="80.2" fill="#222">flint Q6_K (GGUF)</text>
+<circle cx="488.5" cy="96.6" r="7" fill="#2f8f6b"/>
+<text x="498.5" y="88.6" fill="#222">flint Q4_K_XL (GGUF)</text>
+<circle cx="653.6" cy="72.4" r="7" fill="#2f8f6b"/>
+<text x="663.6" y="64.4" fill="#222">ternary-bonsai-2-27b (MLX)</text>
+<circle cx="533.4" cy="89.4" r="7" fill="#2f8f6b"/>
+<text x="543.4" y="81.4" fill="#222">gemma-4-12b (GGUF)</text>
+<circle cx="489.9" cy="89.4" r="7" fill="#2f8f6b"/>
+<text x="499.9" y="81.4" fill="#222">flint Q4_K_M (GGUF)</text>
+<circle cx="496.4" cy="160.4" r="7" fill="#2f8f6b"/>
+<text x="506.4" y="152.4" fill="#222">ternary-bonsai-2-9b (MLX)</text>
+<circle cx="433.9" cy="97.8" r="7" fill="#2f8f6b"/>
+<text x="443.9" y="89.8" fill="#222">qwen3.6-35b-a3b (GGUF)</text>
+<circle cx="466.5" cy="84.5" r="7" fill="#2f8f6b"/>
+<text x="476.5" y="76.5" fill="#222">ornith-1.5-35b-a3b (GGUF)</text>
+<circle cx="682.4" cy="72.4" r="7" fill="#2f8f6b"/>
+<text x="692.4" y="64.4" fill="#222">underdog-saluki-27b-1.0 (GGUF)</text>
+<circle cx="501.3" cy="89.4" r="7" fill="#2f8f6b"/>
+<text x="511.3" y="81.4" fill="#222">mellum2.1-12b-a2.5b-thinking (GGUF)</text>
+<circle cx="674.6" cy="72.4" r="7" fill="#2f8f6b"/>
+<text x="684.6" y="64.4" fill="#222">holo4-27b (GGUF)</text>
+<circle cx="772.1" cy="106.3" r="7" fill="#2f8f6b"/>
+<text x="782.1" y="98.3" fill="#222">nanbeige4.3-33b IQ4_XS (GGUF)</text>
+<circle cx="559.8" cy="139.6" r="7" fill="#2f8f6b"/>
+<text x="569.8" y="131.6" fill="#222">nanbeige_nanbeige4.2-3b (GGUF)</text>
+<circle cx="268.0" cy="269.9" r="7" fill="#2f8f6b"/>
+<text x="278.0" y="261.9" fill="#222">qwen3-vl-4b (MLX)</text>
+<circle cx="401.3" cy="217.9" r="7" fill="#2f8f6b"/>
+<text x="411.3" y="209.9" fill="#222">k2-horizon-3.7b (GGUF)</text>
+<circle cx="339.9" cy="189.8" r="7" fill="#2f8f6b"/>
+<text x="349.9" y="181.8" fill="#222">hy-memory-30b-a3b (GGUF)</text>
+<circle cx="473.5" cy="102.7" r="7" fill="#2f8f6b"/>
+<text x="483.5" y="94.7" fill="#222">sage-a1.5 Q8_0 (GGUF)</text>
+<circle cx="374.6" cy="152.9" r="7" fill="#2f8f6b"/>
+<text x="384.6" y="144.9" fill="#222">minicpm5-2b (GGUF)</text>
+<circle cx="452.3" cy="171.3" r="7" fill="#2f8f6b"/>
+<text x="462.3" y="163.3" fill="#222">lfm2.5-2.6b (GGUF)</text>
+<circle cx="456.2" cy="119.6" r="7" fill="#2f8f6b"/>
+<text x="466.2" y="111.6" fill="#222">agents-a1-4b (GGUF)</text>
+<circle cx="445.7" cy="113.6" r="7" fill="#2f8f6b"/>
+<text x="455.7" y="105.6" fill="#222">mimo-v2.6-distill-qwen-9b Q4_K_S (GGUF)</text>
+<circle cx="396.9" cy="230.4" r="7" fill="#2f8f6b"/>
+<text x="406.9" y="222.4" fill="#222">mistral-small-4-119b-2603 IQ1_M (GGUF)</text>
+<circle cx="467.7" cy="96.6" r="7" fill="#2f8f6b"/>
+<text x="477.7" y="88.6" fill="#222">mimo-v2.6-distill-qwen-9b Q8_0 (GGUF)</text>
+<circle cx="425.3" cy="148.7" r="7" fill="#2f8f6b"/>
+<text x="435.3" y="140.7" fill="#222">underdog-woof-4b-1.1 (MLX)</text>
+<circle cx="327.4" cy="312.1" r="7" fill="#2f8f6b"/>
+<text x="337.4" y="304.1" fill="#222">lfm2.5-8b-a1b (GGUF)</text>
+<circle cx="404.0" cy="283.0" r="7" fill="#2f8f6b"/>
+<text x="414.0" y="275.0" fill="#222">mistral-small-4-119b-2603 IQ2_M (GGUF)</text>
+<circle cx="403.6" cy="136.6" r="7" fill="#2f8f6b"/>
+<text x="413.6" y="128.6" fill="#222">laguna-xs-2.1 (GGUF)</text>
+<circle cx="415.9" cy="86.3" r="7" fill="#2f8f6b"/>
+<text x="425.9" y="78.3" fill="#222">spark-x2.6-4b (GGUF)</text>
+<circle cx="206.4" cy="368.2" r="7" fill="#2f8f6b"/>
+<text x="216.4" y="360.2" fill="#222">lfm2.5-vl-3b (GGUF)</text>
+<circle cx="101.3" cy="383.5" r="7" fill="#2f8f6b"/>
+<text x="111.3" y="375.5" fill="#222">d1-3b (MLX)</text>
+<circle cx="506.8" cy="389.5" r="7" fill="#2f8f6b"/>
+<text x="516.8" y="381.5" fill="#222">lfm2.5-1.2b-thinking (GGUF)</text>
+<circle cx="125.5" cy="431.9" r="7" fill="#2f8f6b"/>
+<text x="135.5" y="423.9" fill="#222">lfm2.5-1.2b (GGUF)</text>
+</svg>
