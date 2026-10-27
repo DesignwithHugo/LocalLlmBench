@@ -1,6 +1,6 @@
 # LocalLlmBench
 
-An unattended benchmark for every model in your LM Studio library on an Apple Silicon Mac. It loads one model at a time, measures speed, memory and context, runs a small quality set, then puts each model to work as an **agent** in a simulated workspace and grades what actually happened. Python standard library only; nothing leaves your Mac.
+An unattended benchmark for every model in your LM Studio library on an Apple Silicon Mac. It loads one model at a time, measures speed, memory and context, runs a small quality set, then puts each model to work as an **agent** in a simulated workspace and grades what actually happened. Python standard library only; nothing leaves your Mac (the optional download queue asks LM Studio to fetch models, nothing else).
 
 **Results so far:** [M1 Max 64 GB, October 2026](results/m1-max-64gb/README.md): 50+ models, 47 of them through the full agent suite and the real-world failure tier, three runs each.
 
@@ -43,6 +43,7 @@ You can stop after step 2 and still have a full agent leaderboard. Models up to 
 ## Safety
 
 - Never raises the GPU memory limit, never asks for a password, never deletes a model unless you list it in `data/delete_when_done.json`.
+- Two quality tasks and two agent tasks ask the model to write Python. That code is executed on your Mac, in a temporary folder, with `python -I`, no environment and a 30-second timeout. It is model-written code, so run the bench on a machine you would run untrusted scripts on.
 - If swap grows more than 6 GB or free disk drops below 12 GB during a test, the model is unloaded and the test recorded as aborted. Testing pauses under 20 GB free.
 - On a Mac that shares models over LM Link, it only unloads its own models.
 

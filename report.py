@@ -480,14 +480,44 @@ def scatter_svg(chat, par, path):
     fr = sorted([p for p in pts if p[3]], key=lambda p: p[1])
     if len(fr) > 1:
         s.append('<polyline fill="none" stroke="#e07a1f" stroke-dasharray="5,4" points="' + " ".join(f"{X(p[1]):.0f},{Y(p[2]):.0f}" for p in fr) + '"/>')
-    for name, x, y, on in pts:
-        col = "#e07a1f" if on else "#4a78c8"
-        s.append(f'<circle cx="{X(x):.1f}" cy="{Y(y):.1f}" r="7" fill="{col}"/>')
-        s.append(f'<text x="{X(x)+10:.1f}" y="{Y(y)-8:.1f}" fill="#222">{name}</text>')
-    s.append(f'<text x="{W-P}" y="{P-10}" text-anchor="end" fill="#e07a1f">orange = no other model is both faster and better</text>')
+    picked = {m["name"] for m in chat if m["key"] in PICKED}
+    for name, x, y, on in pts:  # dots first, labels on top; only frontier models and picks get a label
+        col = "#e07a1f" if (on or name in picked) else "#d9d9d9"
+        r = 7 if (on or name in picked) else 4.5
+        s.append(f'<circle cx="{X(x):.1f}" cy="{Y(y):.1f}" r="{r}" fill="{col}"' + (' stroke="#222" stroke-width="2"' if name in picked else "") + "/>")
+    s += svg_labels([(label_name(n), X(x), Y(y)) for n, x, y, on in pts if on or n in picked], W, color="#e07a1f")
+    s.append(f'<text x="{W-P}" y="{H-P-8}" text-anchor="end" fill="#e07a1f">orange = no other model is both faster and better; black ring = a pick</text>')
     s.append("</svg>")
     open(path, "w").write("\n".join(s))
     return True
+
+
+def label_name(n):
+    return re.sub(r" \((GGUF|MLX)\)$", "", n)
+
+
+def svg_labels(items, W, font_w=7.4, line_h=15, color="#222"):
+    """Place text labels next to points without overlapping each other (greedy: shift down, then try the left side)."""
+    boxes, out = [], []
+    for text, x, y in sorted(items, key=lambda t: (t[2], t[1])):
+        w = len(text) * font_w
+        placed = None
+        for side in (1, -1):
+            lx = x + 10 if side > 0 else x - 10 - w
+            if lx < 4 or lx + w > W - 4:
+                continue
+            for k in range(0, 6):
+                ly = y - 8 + k * line_h
+                box = (lx, ly - 11, lx + w, ly + 3)
+                if not any(not (box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3]) for b in boxes):
+                    placed = (lx, ly); break
+            if placed:
+                break
+        if not placed:
+            placed = (x + 10, y - 8)
+        boxes.append((placed[0], placed[1] - 11, placed[0] + w, placed[1] + 3))
+        out.append(f'<text x="{placed[0]:.1f}" y="{placed[1]:.1f}" fill="{color}" font-weight="600">{text}</text>')
+    return out
 
 
 def agent_svg(models, path):
@@ -516,12 +546,32 @@ def agent_svg(models, path):
         yv = ymin + (ymax - ymin) * i / 5
         s.append(f'<text x="{P-8}" y="{Y(yv)+4}" text-anchor="end" fill="#666">{yv:.0f}</text>')
         s.append(f'<line x1="{P}" y1="{Y(yv)}" x2="{W-P}" y2="{Y(yv)}" stroke="#eee"/>')
+    picked = {m["name"] for m in models if m["key"] in PICKED}
+    # label the picks plus the frontier of this chart (no other model is both faster and better)
+    front = {n for n, x, y in pts if not any(x2 < x and y2 >= y and (x2, y2) != (x, y) for _, x2, y2 in pts)}
     for name, x, y in pts:
-        s.append(f'<circle cx="{X(x):.1f}" cy="{Y(y):.1f}" r="7" fill="#2f8f6b"/>')
-        s.append(f'<text x="{X(x)+10:.1f}" y="{Y(y)-8:.1f}" fill="#222">{name}</text>')
+        lab = name in picked or name in front
+        s.append(f'<circle cx="{X(x):.1f}" cy="{Y(y):.1f}" r="{7 if lab else 4.5}" fill="{"#2f8f6b" if lab else "#d9d9d9"}"'
+                 + (' stroke="#222" stroke-width="2"' if name in picked else "") + "/>")
+    s += svg_labels([(label_name(n), X(x), Y(y)) for n, x, y in pts if n in picked or n in front], W, color="#2f8f6b")
+    s.append(f'<text x="{W-P}" y="{H-P-8}" text-anchor="end" fill="#2f8f6b">dark = no other model is both faster and better; black ring = a pick</text>')
     s.append("</svg>")
     open(path, "w").write("\n".join(s))
     return True
+
+
+PICKED = {}  # model key -> pick labels, filled while the picks list is built; bold in tables and labelled in charts
+
+
+def nm(m):
+    """Model name for a table cell, bold when the model is one of the picks."""
+    return f"**{m['name']}**" if m["key"] in PICKED else m["name"]
+
+
+def lk(m):
+    """Wikilinked model name for the Obsidian report, bold when picked."""
+    t = f"[[{slug(m['name'])}|{m['name']}]]"
+    return f"**{t}**" if m["key"] in PICKED else t
 
 
 def qcell(m):
@@ -558,7 +608,7 @@ def agent_sections(ok, agents, K):
         L[-1] += (f" The same model's score moves about {med(sds):.0f} point{'s' if round(med(sds)) != 1 else ''} from one pass to the next (up to {max(sds):.0f} for the least stable), "
                   "so treat gaps of 3 points or less as ties.")
     L += [""]
-    hdr = ["Model", "Agent score", f"Solved every time ({K} runs)", "Valid tool calls", "Median steps", "Median s per task",
+    hdr = ["Model", "Agent score", f"Solved all {K} runs", "Valid tool calls", "Median steps", "s per task",
            "Tokens per task", "Parallel calls", "Ignored injection", "Notes"]
     rws = []
     for m in agm:
@@ -577,7 +627,7 @@ def agent_sections(ok, agents, K):
             notes.append(f"sent instead of drafting x{m['agent_unauth']}")
         inj = m.get("agent_inj")
         pk = m.get("agent_pass_k")
-        rws.append([m["name"], f(m.get("agent_score"), 0), (f(pk, 0) + "%") if pk is not None else "-",
+        rws.append([nm(m), f(m.get("agent_score"), 0), (f(pk, 0) + "%") if pk is not None else "-",
                     (f(m["agent_valid_pct"], 0) + "%") if m.get("agent_valid_pct") is not None else "-", f(m.get("agent_steps"), 0),
                     f(m.get("agent_sec"), 0), f(m.get("agent_tokens"), 0),
                     ("yes" if (m.get("agent_parallel") or 0) >= 2 else "no") if m.get("agent_parallel") is not None else "-",
@@ -622,7 +672,7 @@ def field_cell(m):
 def field_table(fm, K, md_links=False):
     n = len(A.FIELD_TASKS)
     cats = list(A.FIELD_CATS)
-    hdr = ["Model", "Real-cases score", f"Solved every time ({K} runs)", "Serious slips"] + [A.FIELD_CATS[c] for c in cats] + ["Median s per task", "Notes"]
+    hdr = ["Model", "Real-cases score", f"Solved all {K} runs", "Serious slips"] + [A.FIELD_CATS[c] for c in cats] + ["s per task", "Notes"]
     rws = []
     for m in fm:
         notes = []
@@ -633,7 +683,7 @@ def field_table(fm, K, md_links=False):
         if m.get("field_timeouts"):
             notes.append(f"{m['field_timeouts']} timeouts")
         pk = m.get("field_pass_k")
-        rws.append([m["name"], f(m.get("field_score"), 0), (f(pk, 0) + "%") if pk is not None else "-",
+        rws.append([nm(m), f(m.get("field_score"), 0), (f(pk, 0) + "%") if pk is not None else "-",
                     f"{m.get('field_slips', 0)}/{m.get('field_runs', 0)}"]
                    + [f(m["field_cats"][c] * 100, 0) if m["field_cats"].get(c) is not None else "-" for c in cats]
                    + [f(m.get("field_sec"), 0), "; ".join(notes)])
@@ -716,7 +766,7 @@ def quant_sections(ok, K):
             fmt = "MLX" if "MLX" in (m.get("format") or "") else "GGUF"
             tag = next((v for k, v in SAME_LABEL.items() if k in m["key"].lower()), "")
             label = name + (f" ({tag})" if tag else "")
-            rows.append([label, fmt, m.get("quant") or "-", f(m.get("size_gb")), f(m.get("mem_gb")), f(m.get("tg_d8k")), qcell(m), agent_cell(m),
+            rows.append([f"**{label}**" if m["key"] in PICKED else label, fmt, m.get("quant") or "-", f(m.get("size_gb")), f(m.get("mem_gb")), f(m.get("tg_d8k")), qcell(m), agent_cell(m),
                          field_cell(m), f"{m.get('field_slips', 0)}/{m.get('field_runs', 0)}" if m.get("field_n") else "-", f(m.get("agent_sec"), 0)])
     sds = [m["agent_run_sd"] for m in ok if m.get("agent_run_sd") is not None]
     noise = (f" The same model's agent score moves about {med(sds):.0f} point{'s' if round(med(sds)) != 1 else ''} between passes, "
@@ -724,7 +774,7 @@ def quant_sections(ok, K):
     return ["## Quantization: same model, different sizes", "",
             "Each quant is tested as its own model with the same tests and settings. Bigger quants need more memory and generate more slowly; "
             "the question is whether they also decide better." + noise, "",
-            table(["Model", "Format", "Quant", "File (GB)", "Memory @64k (GB)", "Gen tok/s @8k", "Quality %", "Agent %", "Real cases %", "Serious slips", "Median s per task"], rows), ""]
+            table(["Model", "Format", "Quant", "File (GB)", "Memory @64k (GB)", "Gen tok/s @8k", "Quality %", "Agent %", "Real cases %", "Serious slips", "s per task"], rows), ""]
 
 
 def findings(ok, agents):
@@ -772,7 +822,8 @@ def findings(ok, agents):
 HARNESS_FILES = ["bench.py", "lsclient.py", "tasks.py", "agent.py", "report.py", "run.sh", "README.md"]
 
 
-HOME_RE = re.compile(r"(/|\\\\/)Users(?:/|\\\\/)[^/\\\\\"]+")  # /Users/<name> in plain or JSON-escaped form
+HOME_RE = re.compile(r"(/|\\\\/)Users(?:/|\\\\/)[^/\\\\\"]+|(?:/|\\\\/)private(?:/|\\\\/)var(?:/|\\\\/)folders(?:/|\\\\/)[^/\\\\\"]+(?:(?:/|\\\\/)[^/\\\\\"]+(?:/|\\\\/)T)?")  # home folder and per-user temp folder, plain or JSON-escaped
+SCRUB = []  # (text, replacement) pairs applied to the published raw data
 
 
 def package_harness(cdir):
@@ -820,9 +871,77 @@ def mirror_harness(out):
 
 # ---------------------------------------------------------------- build
 
-def table(headers, rows):
-    out = ["| " + " | ".join(headers) + " |", "|" + "|".join("---" for _ in headers) + "|"]
-    out += ["| " + " | ".join(str(c) for c in r) + " |" for r in rows]
+LOWER_IS_BETTER = ("s per task", "ttft", "mem", "memory", "s to ", "seconds", "tokens per task", "slips", "median steps", "cold", "warm", "cont",
+                   "reasoning", "time", "latency", "ms")
+HIGHER_IS_BETTER = ("%", "tok/s", "t/s", "quality", "agent", "real", "solved", "valid", "score", "max ctx", "prefill", "gen", "recall", "injection",
+                    "chunks", "needle", "speedup", "writing", "coding", "vision", "parallel", "context")
+NOT_RANKED = ("model", "format", "quant", "notes", "engine", "file", "size", "category", "task", "what", "tier", "frontier", "pareto")
+
+
+def _num(cell):
+    """Numeric value of a table cell for ranking: '12.3', '94%', '3/30', '152x', '1,138', '99*', '256k'; None if not a number."""
+    t = str(cell).strip().replace("**", "").replace(",", "").rstrip("*").strip()
+    if not t or t == "-":
+        return None
+    if "/" in t and all(x.strip().isdigit() for x in t.split("/")[:2]):
+        a, b = t.split("/")[:2]
+        return int(a) / int(b) if int(b) else None
+    m = re.match(r"^-?\d+(\.\d+)?", t)
+    if not m:
+        return None
+    v = float(m.group(0))
+    return v * 1000 if t[m.end():m.end() + 1] == "k" else v
+
+
+def _best_cols(headers):
+    out = {}
+    for i, h in enumerate(headers):
+        hl = h.lower()
+        if any(k in hl for k in NOT_RANKED) and not any(k in hl for k in ("score", "%")):
+            continue
+        if any(k in hl for k in LOWER_IS_BETTER):
+            out[i] = min
+        elif any(k in hl for k in HIGHER_IS_BETTER):
+            out[i] = max
+    return out
+
+
+def table(headers, rows, rank=True):
+    """Markdown table. With rank, the best value in each numeric column is bold (lower is better for times, memory and slips)."""
+    rows = [[str(c) for c in r] for r in rows]
+    if rank and len(rows) > 1:
+        for i, fn in _best_cols(headers).items():
+            vals = [(_num(r[i]) if i < len(r) else None) for r in rows]
+            good = [v for v in vals if v is not None]
+            if len(good) < 2:
+                continue
+            b = fn(good)
+            if sum(1 for v in good if v == b) > 3:  # a tie across many rows says nothing
+                continue
+            for r, v in zip(rows, vals):
+                if v is not None and v == b and not r[i].startswith("**"):
+                    r[i] = f"**{r[i]}**"
+    # numbers right-aligned (GitHub and Obsidian honour the ---: marker), text left
+    aligns = []
+    for i in range(len(headers)):
+        cells = [r[i] for r in rows if i < len(r) and r[i].strip() not in ("", "-")]
+        aligns.append("---:" if cells and sum(_num(c) is not None for c in cells) >= 0.8 * len(cells) and i > 0 else "---")
+    if rank and len(rows) > 3:
+        # per row: the metric where this model ranks best against the others (if it is in the top third there) is bold too
+        cols = _best_cols(headers)
+        ranks = {}
+        for i, fn in cols.items():
+            vals = [(_num(r[i]) if i < len(r) else None) for r in rows]
+            good = sorted({v for v in vals if v is not None}, reverse=(fn is max))
+            if len(good) < 4:
+                continue
+            ranks[i] = {v: k / (len(good) - 1) for k, v in enumerate(good)}  # 0 = best, 1 = worst
+        for r in rows:
+            best = min(((ranks[i][_num(r[i])], i) for i in ranks if i < len(r) and _num(r[i]) in ranks[i]), default=None)
+            if best and best[0] <= 0.34 and not r[best[1]].startswith("**"):
+                r[best[1]] = f"**{r[best[1]]}**"
+    out = ["| " + " | ".join(headers) + " |", "|" + "|".join(aligns) + "|"]
+    out += ["| " + " | ".join(r) + " |" for r in rows]
     return "\n".join(out)
 
 
@@ -837,8 +956,6 @@ def build():
     emb = [m for m in M.values() if m.get("embedding")]
     par = pareto(ok)
     ok.sort(key=lambda m: -(m.get("quality") or 0))
-    has_chart = scatter_svg(ok, par, os.path.join(OUT, "charts", "speed_vs_quality.svg"))
-    has_agent_chart = agent_svg(ok, os.path.join(OUT, "charts", "agent_vs_time.svg"))
     agents = sorted([m for m in ok if m.get("agent_n", 0) >= 12], key=lambda m: -(m.get("agent_score") or 0))
     K = CFG.get("agent_trials", 3)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -851,7 +968,10 @@ def build():
     # picks
     picks = []
     bq = max([m.get("quality") or 0 for m in ok] or [0])
+    PICKED.clear()
     def pick(label, m, why):
+        if m:
+            PICKED.setdefault(m["key"], []).append(label)
         if m:
             picks.append(f"- **{label}:** [[{slug(m['name'])}|{m['name']}]] ({why(m)})")
     def overall(m):  # text quality and agent score count equally once the agent suite has run
@@ -908,6 +1028,9 @@ def build():
         if e:
             picks.append(f"- **Vault search embeddings:** {e['name']} (recall@1 {f((e.get('recall1') or 0)*100,0)}%, {f(e.get('chunks_per_s'))} chunks/s)")
 
+    has_chart = scatter_svg(ok, par, os.path.join(OUT, "charts", "speed_vs_quality.svg"))
+    has_agent_chart = agent_svg(ok, os.path.join(OUT, "charts", "agent_vs_time.svg"))
+
     # status
     excluded = [m for m in inv.get("models", []) if m.get("excluded")]
     tested_keys = set(M)
@@ -936,11 +1059,11 @@ def build():
     hdr = ["Model", "Format", "Memory needed @64k (GB)", "Gen tok/s @8k", "Time to first token @8k (s)", "Quality %", "Agent %", "Real cases %", "Vision %", "Max context loaded", "Frontier"]
     rws = []
     for m in ok:
-        rws.append([f"[[{slug(m['name'])}|{m['name']}]]", (m.get("format") or ""), f(m.get("mem_gb")),
+        rws.append([lk(m), (m.get("format") or ""), f(m.get("mem_gb")),
                     f(m.get("tg_d8k")), f(m.get("ttft_d8k"), 2), qcell(m), agent_cell(m), field_cell(m), f(m.get("vision"), 0),
                     ctxk(m.get("ctx_max_loaded") or m.get("ctx_std")), "yes" if m["key"] in par else ""])
     L += ["## Summary", "", table(hdr, rws), "",
-          "Quality is the average of the text categories below (0 to 100). Agent is the multi-step tool-use suite; Real cases is the tier rebuilt from real agent failures (both below). Frontier means no other model here is both faster and better."]
+          "**Bold** model = one of the picks above; **bold** number = best in its column, or the metric where that model stands out most. Quality is the average of the text categories below (0 to 100). Agent is the multi-step tool-use suite; Real cases is the tier rebuilt from real agent failures (both below). Frontier means no other model here is both faster and better."]
     if any(m.get("capped") for m in ok):
         L += ["", CAPPED_NOTE]
     sp = [m for m in ok if special_note(m)]
@@ -1137,7 +1260,10 @@ views:
     try:
         with open(RESULTS, encoding="utf-8") as src, open(os.path.join(cdir, "results.jsonl"), "w", encoding="utf-8") as dst:
             for line in src:  # crash tracebacks can carry the user's home folder
-                dst.write(HOME_RE.sub("~", line))
+                line = HOME_RE.sub("~", line)
+                for a, b in SCRUB:
+                    line = line.replace(a, b)
+                dst.write(line)
         for name, flag in (("speed_vs_quality.svg", has_chart), ("agent_vs_time.svg", has_agent_chart)):
             if flag:
                 shutil.copy(os.path.join(OUT, "charts", name), os.path.join(cdir, name))
@@ -1148,12 +1274,12 @@ views:
     except Exception:
         pass
     strip = lambda p: re.sub(r"\[\[[^|\]]*\|([^\]]*)\]\]", r"\1", p)
-    t_agent = table(["Model", "Format", "Agent %", f"Solved every time ({K} runs)", "Median s per task", "Valid tool calls", "Ignored injection"],
-                    [[m["name"], m.get("format") or "", f(m.get("agent_score"), 0), (f(m["agent_pass_k"], 0) + "%") if m.get("agent_pass_k") is not None else "-",
+    t_agent = table(["Model", "Format", "Agent %", f"Solved all {K} runs", "s per task", "Valid tool calls", "Ignored injection"],
+                    [[nm(m), m.get("format") or "", f(m.get("agent_score"), 0), (f(m["agent_pass_k"], 0) + "%") if m.get("agent_pass_k") is not None else "-",
                       f(m.get("agent_sec"), 0), (f(m["agent_valid_pct"], 0) + "%") if m.get("agent_valid_pct") is not None else "-",
                       "{}/{}".format(*m["agent_inj"]) if m.get("agent_inj") else "-"] for m in agents]) if agents else ""
     tbl = table(["Model", "Format", "Mem @64k GB", "Gen t/s @8k", "TTFT @8k s", "Prefill t/s @32k", "Max ctx loaded", "Quality %", "Agent %", "Real cases %"],
-                [[m["name"], (m.get("format") or ""), f(m.get("mem_gb")), f(m.get("tg_d8k")), f(m.get("ttft_d8k"), 2),
+                [[nm(m), (m.get("format") or ""), f(m.get("mem_gb")), f(m.get("tg_d8k")), f(m.get("ttft_d8k"), 2),
                   f(m.get("pp_d32k"), 0), ctxk(m.get("ctx_max_loaded") or m.get("ctx_std")), qcell(m), agent_cell(m), field_cell(m)] for m in ok])
     fms = sorted([m for m in ok if m.get("field_n")], key=lambda m: -(m.get("field_score") or 0))
     t_field = field_table(fms, K) if fms else ""
@@ -1170,9 +1296,19 @@ views:
                       (f(m.get("cache_speedup"), 0) + "x") if m.get("cache_speedup") else "-"] for m in cm]) if cm else ""
     engines = sorted({m.get("engine") for m in ok if m.get("engine")})
     fnd = findings(ok, agents)
+    # the short version: what to run for what, and a compact leaderboard sorted by the hardest tier
+    ranked = sorted([m for m in ok if (m.get("field_n") or 0) >= len(A.FIELD_TASKS)], key=lambda m: -(m.get("field_score") or 0))
+    t_top = table(["Model", "Mem @64k GB", "Real cases %", "Agent %", "Quality %", "tok/s"],
+                  [[nm(m), f(m.get("mem_gb")), f(m.get("field_score"), 0), f(m.get("agent_score"), 0), qcell(m), f(m.get("tg_d8k"), 0)]
+                   for m in ranked[:12]]) if len(ranked) >= 5 else ""
+    quick = [strip(p) for p in picks[:8]]
     readme = [f"# M1 Max 64 GB: {len(ok)} local models in LM Studio, {len(agents)} of them also tested as agents ({datetime.now():%B %Y})", "",
               f"Hardware: {env.get('chip', 'Apple M1 Max')} (32-core GPU), {env.get('ram_gb', 64)} GB, macOS {env.get('macos', '')}. "
               f"LM Studio {env.get('lmstudio_app', '')}; engines used: {', '.join(engines) or '-'}.", ""]
+    if quick:
+        readme += ["## What to run", "", "Picks from the tables below. Memory is at a 64k context; real cases is the tier rebuilt from real agent failures and the one that separates models most.", ""] + quick + [""]
+    if t_top:
+        readme += ["## Top 12 by real cases", "", t_top, "", "Scores are out of 100. Differences under about 3 points are noise.", ""]
     if fnd:
         readme += ["## Findings", ""] + [f"- {x}" for x in fnd] + [""]
     if agents:
@@ -1215,29 +1351,25 @@ views:
     title = (f"I tested {len(agents)} local models on an M1 Max 64GB as agents ({len(A.TASKS)} multi-step tool tasks"
              + (f" + {len(A.FIELD_TASKS)} rebuilt from real agent failures" if fms else "") + f", x{K} runs), plus speed and context for {len(ok)}"
              if agents else f"M1 Max 64GB benchmark: {len(ok)} models in LM Studio at 64k context, plus max context and a small quality test")
+    repo = CFG.get("repo_url") or "[link to repo]"
     post = [f"Title: {title}", "", "Body:", "",
-            "Measured numbers for current models on an M1 Max are hard to find, and tok/s doesn't tell you whether a model can actually run an agent. "
-            "So I built an unattended harness and ran my whole LM Studio library through it: speed and memory at the same 64k context, the biggest context "
-            "each model loads (filled to 128k), a small quality set, and an agent suite where every model works through tools in a fake workspace "
-            "(calendar, email, files, a tiny Python repo) and gets graded on what actually happened.", ""]
-    if agents:
-        post += ["**Agents**", "", t_agent, ""]
-    if t_field:
-        post += ["**Real-world failure tier**", "", f"I also went through my own assistants' logs and past chats for mistakes they actually made, and rebuilt "
-                 f"{len(A.FIELD_TASKS)} of them as tasks (anonymized): stamping invoices without cross-checking the purchase order, 'tidying' a chart "
-                 "by moving its data points, trusting stale setup notes, overwriting another session's log entry, inventing references, deleting "
-                 "without a confirmed backup, claiming every file was fixed. 'Serious slips' = runs that did something hard to undo or said something false.", "",
-                 t_field, ""]
-    post += ["**Speed and memory**", "", tbl, ""]
+            "tok/s doesn't tell you whether a model can run an agent, so I built an unattended harness and ran my whole LM Studio library through it "
+            f"on an M1 Max 64 GB: speed and memory at the same 64k context, max context, a quality set, {len(A.TASKS)} multi-step tool tasks in a "
+            f"simulated workspace, and {len(A.FIELD_TASKS)} tasks rebuilt from mistakes my own assistants actually made (stamping invoices without "
+            "checking the order, moving data while 'tidying' a chart, deleting when the backup check timed out, acting before the plan was approved). "
+            f"Every agent task ran {K} times and is graded on what happened in the workspace, not on how the answer sounds.", ""]
+    post += ["**What to run**", ""] + quick + [""]
+    if t_top:
+        post += ["**Top 12 by the real-world tier** (memory at 64k context; scores out of 100, under ~3 points apart is noise; bold model = a pick above, bold number = best in column or that model's standout metric)", "", t_top, ""]
     if fnd:
         post += ["**What stood out**", ""] + [f"- {x}" for x in fnd] + [""]
-    post += ["**Picks**", ""] + [strip(p) for p in picks[:8]] + [""]
-    post += [f"Method in short: one model loaded at a time, medians of repeated runs, memory = LM Studio's own estimate (weights + KV cache). "
-             f"Agent tasks use native tool calls through LM Studio's API, {K} runs each at temperature {CFG.get('agent_temperature', 0.6)}; tool results are "
-             "simulated and deterministic, so every run is replayable. Half the tasks are in Spanish because that's what I use.", "",
-             "Harness (Python, standard library only, runs against LM Studio's local server) + full data including every agent trace: "
-             + (CFG.get("repo_url") or "[link to repo]"), "",
-             "If you have a different Mac, the harness writes results in the same format; I'd love to compare. Happy to add a model that fits in 64GB."]
+    post += ["**Caveats**", "",
+             "- One person's tasks on one machine. Half the tasks are in Spanish because that's what I use.",
+             "- Writing quality is scored by local judge models from another family; everything else is deterministic code checking the final state.",
+             "- The base quality set is nearly saturated for good models; the real-world tier is where they separate.", "",
+             f"Full tables ({len(ok)} models: speed, memory, context, quant comparisons, prompt cache, every agent task), the harness and every trace: {repo}", "",
+             "If you have a different Mac, run it and open a PR with your results folder; numbers from other machines are the most useful part. "
+             "Model requests welcome if they fit in 64 GB."]
     open(os.path.join(cdir, "reddit_post.md"), "w", encoding="utf-8").write("\n".join(post) + "\n")
     return True
 
