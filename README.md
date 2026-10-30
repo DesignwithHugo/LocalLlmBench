@@ -2,7 +2,7 @@
 
 An unattended benchmark for every model in your LM Studio library on an Apple Silicon Mac. It loads one model at a time, measures speed, memory and context, runs a small quality set, then puts each model to work as an **agent** in a simulated workspace and grades what actually happened. Python standard library only; nothing leaves your Mac (the optional download queue asks LM Studio to fetch models, nothing else).
 
-**Results so far:** [M1 Max 64 GB, October 2026](results/m1-max-64gb/README.md): 50+ models, 48 of them through the full agent suite and the real-world failure tier, three runs each.
+**Results so far:** [M1 Max 64 GB, October 2026](results/m1-max-64gb/README.md): 63 models, 60 of them through the full agent suite and the real-world failure tier, three runs each.
 
 ## Why
 
