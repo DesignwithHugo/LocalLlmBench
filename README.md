@@ -6,6 +6,8 @@ An unattended benchmark for every model in your LM Studio library on an Apple Si
 
 ## Why
 
+I made this for myself first, as a practical guide and a record of which local models are worth using on my Mac. There were simply too many models and too little information about this specific machine, and I was going a bit insane picking them by vibes. I wanted a clearer sense of direction: what's useful, what isn't, and which one to reach for. The leaderboard and the harness are the result, shared in case your Mac looks like mine.
+
 Tokens per second doesn't tell you whether a model can run an agent. So besides the usual speed and context numbers, every model here works through 16 multi-step tool tasks (calendar, email, files, meeting rooms, sales data, two small Python repos) and 10 more tasks rebuilt from mistakes real assistants made (stamping invoices without checking the purchase order, "tidying" a chart by moving its data, deleting when the backup check timed out, acting before the plan was approved). Grading is deterministic code that checks the final state of the workspace, so every run is replayable.
 
 ## Run it on your own Mac
