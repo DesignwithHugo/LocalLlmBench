@@ -65,6 +65,8 @@ def short_name(key, fmt=""):
     k = re.sub(r"(?i)[-_](gguf|mlx|instruct|it)\b", "", k)
     k = re.sub(r"(?i)[-_]?(\d+bit|q\d_k_\w+|ud-q\d\w*)$", "", k)
     tag = "MLX" if ("safetensors" in fmt or "mlx" in fmt or "mlx" in key.lower()) else ("GGUF" if "gguf" in fmt or "gguf" in key.lower() else "")
+    if key.lower().endswith("@omlx"):
+        tag = "oMLX"
     return f"{k} ({tag})" if tag else k
 
 
@@ -97,7 +99,8 @@ def engine_str(eng, fmt):
     """'llama.cpp 2.63.0' / 'MLX 1.13.1' for the engine a model ran on."""
     for e in eng or []:
         if isinstance(e, dict) and e.get("model_format") == ("safetensors" if "MLX" in (fmt or "") else "gguf"):
-            return ("MLX " if "mlx" in e.get("name", "") else "llama.cpp ") + str(e.get("version", ""))
+            name = e.get("name", "")
+            return ("oMLX " if name.startswith("omlx") else "MLX " if "mlx" in name else "llama.cpp ") + str(e.get("version", ""))
     return None
 
 
@@ -181,6 +184,15 @@ def aggregate(rows):
             a.update({"dmax_tokens": dm[0].get("prompt_tokens") or dm[0].get("target_tokens"), "dmax_ttft": dm[0].get("ttft"),
                       "dmax_tg": dm[0].get("decode_tps"), "dmax_needle": dm[0].get("needle"),
                       "dmax_mem_peak": dm[0].get("mem_peak_gb"), "dmax_swap": dm[0].get("swap_delta_mb")})
+        df = recs("dfull")
+        if df and not df[0].get("skipped") and df[0].get("ok", True) and df[0].get("decode_tps"):
+            a.update({"dfull_tokens": df[0].get("prompt_tokens") or df[0].get("target_tokens"), "dfull_ctx": df[0].get("ctx"), "dfull_native": df[0].get("native_ctx"), "dfull_ttft": df[0].get("ttft"),
+                      "dfull_pp": df[0].get("prefill_tps"), "dfull_tg": df[0].get("decode_tps"), "dfull_needle": df[0].get("needle"),
+                      "dfull_mem_peak": df[0].get("mem_peak_gb"), "dfull_swap": df[0].get("swap_delta_mb")})
+        cl = recs("cache_long")
+        if cl and not cl[0].get("skipped") and cl[0].get("cold_ttft"):
+            a.update({"cachel_tokens": cl[0].get("prompt_tokens"), "cachel_cold": cl[0].get("cold_ttft"), "cachel_warm": cl[0].get("warm_ttft"),
+                      "cachel_cont": cl[0].get("cont_ttft"), "cachel_speedup": cl[0].get("speedup")})
         ve = recs("vis_encode")
         a["img_overhead_s"] = ve[0].get("image_overhead_s") if ve else None
         # quality
@@ -273,28 +285,34 @@ def collect_trials(a, tests, prefix):
     return ag
 
 
-def field_metrics(a, tests):
-    """Real-cases tier: score, solved every time, serious slips, by category."""
-    fx = collect_trials(a, tests, "fx:")
-    a["field_tasks"], a["field_n"] = fx, len(fx)
+def tier_metrics(a, tests, prefix, pfx):
+    """A separately scored agent tier ('fx:' real cases -> field_*, 'hx:' hard tier -> hard_*): score, solved every time, serious slips, by category."""
+    fx = collect_trials(a, tests, prefix)
+    a[pfx + "tasks"], a[pfx + "n"] = fx, len(fx)
     if not fx:
-        a["field_cats"] = {}
+        a[pfx + "cats"] = {}
         return
     k = CFG.get("agent_trials", 3)
     allv = [x for xs in fx.values() for x in xs]
     run = [x for x in allv if not x.get("skipped")]
-    a["field_score"] = mean([task_mean(xs) for xs in fx.values()]) * 100
+    a[pfx + "score"] = mean([task_mean(xs) for xs in fx.values()]) * 100
     full = [xs for xs in fx.values() if len(xs) >= k]
-    a["field_pass_k"] = sum(all(x.get("solved") for x in xs) for xs in full) / len(full) * 100 if full else None
-    a["field_k_tasks"] = len(full)
-    a["field_runs"] = len(run)
-    a["field_slips"] = sum(1 for tid, xs in fx.items() for x in xs if A.slipped(tid, x.get("note")))
-    a["field_sec"] = med([x.get("t_total") for x in run])
-    a["field_timeouts"] = sum(1 for x in allv if x.get("stop") == "timeout")
+    a[pfx + "pass_k"] = sum(all(x.get("solved") for x in xs) for xs in full) / len(full) * 100 if full else None
+    a[pfx + "k_tasks"] = len(full)
+    a[pfx + "runs"] = len(run)
+    a[pfx + "reps"] = max(len(xs) for xs in fx.values())  # runs per task (the final picks get more than agent_trials)
+    a[pfx + "slips"] = sum(1 for tid, xs in fx.items() for x in xs if A.slipped(tid, x.get("note")))
+    a[pfx + "sec"] = med([x.get("t_total") for x in run])
+    a[pfx + "timeouts"] = sum(1 for x in allv if x.get("stop") == "timeout")
     cs = {}
     for tid, xs in fx.items():
         cs.setdefault(A.TASK_BY_ID[tid]["cat"], []).append(task_mean(xs))
-    a["field_cats"] = {c: mean(v) for c, v in cs.items()}
+    a[pfx + "cats"] = {c: mean(v) for c, v in cs.items()}
+
+
+def field_metrics(a, tests):
+    tier_metrics(a, tests, "fx:", "field_")
+    tier_metrics(a, tests, "hx:", "hard_")
 
 
 def agent_metrics(a, tests, recs):
@@ -671,45 +689,51 @@ def agent_sections(ok, agents, K):
     return L
 
 
-def field_cell(m):
-    if not m.get("field_n"):
+def field_cell(m, pfx="field_", tasks=None):
+    tasks = tasks if tasks is not None else A.FIELD_TASKS
+    if not m.get(pfx + "n"):
         return "-"
-    v = f(m.get("field_score"), 0)
-    n = len(A.FIELD_TASKS)
-    return v if m["field_n"] >= n else f"{v} ({m['field_n']}/{n})"
+    v = f(m.get(pfx + "score"), 0)
+    n = len(tasks)
+    return v if m[pfx + "n"] >= n else f"{v} ({m[pfx + 'n']}/{n})"
 
 
-def field_table(fm, K, md_links=False):
-    n = len(A.FIELD_TASKS)
-    cats = list(A.FIELD_CATS)
-    hdr = ["Model", "Real-cases score", f"Solved all {K} runs", "Serious slips"] + [A.FIELD_CATS[c] for c in cats] + ["s per task", "Notes"]
+def field_table(fm, K, md_links=False, pfx="field_", tasks=None, cats_map=None, label="Real-cases score"):
+    tasks = tasks if tasks is not None else A.FIELD_TASKS
+    cats_map = cats_map or A.FIELD_CATS
+    n = len(tasks)
+    cats = list(cats_map)
+    hdr = ["Model", label, "Solved every run", "Serious slips"] + [cats_map[c] for c in cats] + ["s per task", "Notes"]
     rws = []
     for m in fm:
         notes = []
-        if m["field_n"] < n:
-            notes.append(f"{m['field_n']}/{n} tasks so far")
-        elif (m.get("field_k_tasks") or 0) < m["field_n"]:
-            notes.append(f"repeat runs done for {m.get('field_k_tasks') or 0}/{n}")
-        if m.get("field_timeouts"):
-            notes.append(f"{m['field_timeouts']} timeouts")
-        pk = m.get("field_pass_k")
-        rws.append([nm(m), f(m.get("field_score"), 0), (f(pk, 0) + "%") if pk is not None else "-",
-                    f"{m.get('field_slips', 0)}/{m.get('field_runs', 0)}"]
-                   + [f(m["field_cats"][c] * 100, 0) if m["field_cats"].get(c) is not None else "-" for c in cats]
-                   + [f(m.get("field_sec"), 0), "; ".join(notes)])
+        if m[pfx + "n"] < n:
+            notes.append(f"{m[pfx + 'n']}/{n} tasks so far")
+        elif (m.get(pfx + "k_tasks") or 0) < m[pfx + "n"]:
+            notes.append(f"repeat runs done for {m.get(pfx + 'k_tasks') or 0}/{n}")
+        if (m.get(pfx + "reps") or 0) > K:
+            notes.append(f"{m[pfx + 'reps']} runs per task")
+        if m.get(pfx + "timeouts"):
+            notes.append(f"{m[pfx + 'timeouts']} timeouts")
+        pk = m.get(pfx + "pass_k")
+        rws.append([nm(m), f(m.get(pfx + "score"), 0), (f(pk, 0) + "%") if pk is not None else "-",
+                    f"{m.get(pfx + 'slips', 0)}/{m.get(pfx + 'runs', 0)}"]
+                   + [f(m[pfx + "cats"][c] * 100, 0) if m[pfx + "cats"].get(c) is not None else "-" for c in cats]
+                   + [f(m.get(pfx + "sec"), 0), "; ".join(notes)])
     return table(hdr, rws)
 
 
-def field_task_rows(fm):
+def field_task_rows(fm, pfx="field_", tasks=None):
+    tasks = tasks if tasks is not None else A.FIELD_TASKS
     rows = []
-    for t in A.FIELD_TASKS:
-        runs = [x for m in fm for x in m["field_tasks"].get(t["id"], [])]
+    for t in tasks:
+        runs = [x for m in fm for x in m[pfx + "tasks"].get(t["id"], [])]
         if not runs:
             continue
         rate = mean([1.0 if x.get("solved") else 0.0 for x in runs])
         slips = sum(1 for x in runs if A.slipped(t["id"], x.get("note")))
-        have = [m for m in fm if m["field_tasks"].get(t["id"])]
-        top = [m["name"] for m in sorted(have, key=lambda m: m.get("field_sec") or 0) if task_mean(m["field_tasks"][t["id"]]) >= 0.999][:3]
+        have = [m for m in fm if m[pfx + "tasks"].get(t["id"])]
+        top = [m["name"] for m in sorted(have, key=lambda m: m.get(pfx + "sec") or 0) if task_mean(m[pfx + "tasks"][t["id"]]) >= 0.999][:3]
         rows.append((rate, t, slips, len(runs), top))
     rows.sort(key=lambda x: x[0])
     return rows
@@ -730,6 +754,25 @@ def field_sections(ok, K):
     L += ["### The real cases, hardest first", "",
           table(["Task", "Category", "What went wrong originally", "What it checks", "Runs solved", "Serious slips", "Perfect every run (fastest first)"],
                 [[t["id"].replace("fx_", ""), A.FIELD_CATS[t["cat"]], t["origin"], t["desc"], f"{rate * 100:.0f}%", f"{sl}/{nr}", ", ".join(top) or "-"]
+                 for rate, t, sl, nr, top in rows]), ""]
+    return L
+
+
+def hard_sections(ok, K):
+    hm = sorted([m for m in ok if m.get("hard_n")], key=lambda m: -(m.get("hard_score") or 0))
+    if not hm:
+        return []
+    n = len(A.HARD_TASKS)
+    L = ["## Hard tier (added November 2026)", "",
+         f"{n} tasks aimed at what the October round left untested: undoing your own half-done work so the repo ends exactly as it "
+         "started, a written rule that contradicts the user's instruction, and bookkeeping at 40 lines where padding, skipped pages "
+         "or rounding show. Scored separately from the other two tiers. 'Serious slips' counts runs that "
+         f"{A.HARD_SLIP_TEXT}.", "",
+         field_table(hm, K, pfx="hard_", tasks=A.HARD_TASKS, cats_map=A.HARD_CATS, label="Hard-tier score"), ""]
+    rows = field_task_rows(hm, pfx="hard_", tasks=A.HARD_TASKS)
+    L += ["### The hard tasks, hardest first", "",
+          table(["Task", "Category", "Why it's here", "What it checks", "Runs solved", "Serious slips", "Perfect every run (fastest first)"],
+                [[t["id"].replace("hx_", ""), A.HARD_CATS[t["cat"]], t["origin"], t["desc"], f"{rate * 100:.0f}%", f"{sl}/{nr}", ", ".join(top) or "-"]
                  for rate, t, sl, nr, top in rows]), ""]
     return L
 
@@ -785,6 +828,191 @@ def quant_sections(ok, K):
             "Each quant is tested as its own model with the same tests and settings. Bigger quants need more memory and generate more slowly; "
             "the question is whether they also decide better." + noise, "",
             table(["Model", "Format", "Quant", "File (GB)", "Memory @64k (GB)", "Gen tok/s @8k", "Quality %", "Agent %", "Real cases %", "Serious slips", "s per task"], rows), ""]
+
+
+def slip_rate(m):
+    """Serious slips per real-case run, smoothed with one imaginary slip in two imaginary runs, so a model with few runs is not rewarded for the small sample."""
+    return ((m.get("field_slips") or 0) + 1) / ((m.get("field_runs") or 0) + 2)
+
+
+def need_gb(m):
+    """Memory a model really needs at the standard context: LM Studio's estimate, or the file size plus a little when the estimate is lower than the file."""
+    est, size = m.get("mem_gb") or 0, m.get("size_gb") or 0
+    return max(est, size + 0.5) if size else est
+
+
+def guide_sections(ok, pickable, agents, env, K):
+    """The practical guide: how to choose a model for this kind of Mac, written from the data, plus the owner's own setup and the limits."""
+    fdone = [m for m in pickable if (m.get("field_n") or 0) >= len(A.FIELD_TASKS) and m.get("tg_d8k")]
+    if len(fdone) < 5:
+        return []
+    def everyday(m):
+        xs = [m.get("quality"), m.get("agent_score") if m.get("agent_n", 0) >= 12 else None, m.get("field_score")]
+        xs = [x for x in xs if x is not None]
+        return sum(xs) / len(xs) if xs else None
+    def safe(m):  # for unattended work: real cases minus the slip rate (smoothed, so 0 in 30 runs is not read as safer than 1 in 100)
+        return (m.get("field_score") or 0) - 150 * slip_rate(m)
+    # 1. memory tiers
+    tiers = []
+    for ram in (16, 24, 32, 48, 64):
+        budget = ram * (0.65 if ram <= 24 else 0.7)
+        fits = [m for m in fdone if need_gb(m) <= budget]
+        if not fits:
+            continue
+        ev = best(fits, everyday, lambda m: (m.get("tg_d8k") or 0) >= 40) or best(fits, everyday)
+        sf = best(fits, safe)
+        fast = (best(fits, lambda m: m.get("tg_d8k"), lambda m: (m.get("quality") or 0) >= 80 and (m.get("field_score") or 0) >= 85)
+                or best(fits, lambda m: m.get("tg_d8k"), lambda m: (m.get("quality") or 0) >= 80 and (m.get("field_score") or 0) >= 75))
+        cell = lambda m, extra: f"{nm(m)} ({extra})" if m else "-"
+        tiers.append([f"{ram} GB", f"{budget:.0f}",
+                      cell(ev, f"{f(need_gb(ev))} GB, {f(ev.get('field_score'), 0)} real cases, {f(ev.get('tg_d8k'), 0)} tok/s"),
+                      cell(sf, f"{f(sf.get('field_score'), 0)} real cases, {sf.get('field_slips', 0)} slip{'' if sf.get('field_slips', 0) == 1 else 's'} in {sf.get('field_runs', 0)} runs"),
+                      cell(fast, f"{f(fast.get('tg_d8k'), 0)} tok/s, {f(fast.get('field_score'), 0)} real cases")])
+    t_tiers = table(["Mac RAM", "Model budget (GB)", "Everyday (chat + agents)", "Unattended agent (fewest slips)", "Fastest that is still careful"], tiers, rank=False)
+    # 2. which column to read
+    sat = sum(1 for m in fdone if (m.get("agent_score") or 0) >= 95)
+    fs = sorted(m.get("field_score") or 0 for m in fdone)
+    # 3. quant pairs
+    pairs = []
+    groups = {}
+    for m in fdone:
+        groups.setdefault(quant_family(m), []).append(m)
+    for name, xs in groups.items():
+        gg = [m for m in xs if "GGUF" in (m.get("format") or "")]
+        q4 = next((m for m in gg if re.search(r"Q4_K|IQ4|Q4_0", m.get("quant") or "")), None)
+        q8 = next((m for m in gg if re.search(r"Q8|Q6", m.get("quant") or "")), None)
+        if q4 and q8 and q4 is not q8:
+            pairs.append((name, q4, q8))
+    quant_lines = []
+    for name, q4, q8 in sorted(pairs):
+        quant_lines.append(f"- {name}: {q8.get('quant')} costs {f(need_gb(q8) - need_gb(q4), 0)} GB more and runs at {f(q8.get('tg_d8k'), 0)} vs {f(q4.get('tg_d8k'), 0)} tok/s; "
+                           f"quality {f(q8.get('quality'), 0)} vs {f(q4.get('quality'), 0)}, real cases {f(q8.get('field_score'), 0)} vs {f(q4.get('field_score'), 0)}, "
+                           f"slips {q8.get('field_slips', 0)}/{q8.get('field_runs', 0)} vs {q4.get('field_slips', 0)}/{q4.get('field_runs', 0)}.")
+    q8_wins = sum(1 for _, q4, q8 in pairs if (q8.get("field_score") or 0) > (q4.get("field_score") or 0) + 3)
+    low = [m for m in fdone if re.search(r"IQ1|IQ2|2bit|PQ2|Q2_K", m.get("quant") or "")]
+    lowbest = best(low, lambda m: m.get("field_score")) if low else None
+    # 4. engines
+    gg = [m for m in fdone if "GGUF" in (m.get("format") or "")]
+    mx = [m for m in fdone if "MLX" in (m.get("format") or "")]
+    cg = med([m["cache_speedup"] for m in gg if m.get("cache_speedup")]) if gg else None
+    cmx = med([m["cache_speedup"] for m in mx if m.get("cache_speedup")]) if mx else None
+    text_mlx = sum(1 for m in mx if m.get("agent_text_calls"))
+    text_gg = sum(1 for m in gg if m.get("agent_text_calls"))
+    # 5. warm model: load times
+    loads = [m.get("load_first_s") for m in fdone if m.get("load_first_s")]
+    # the owner's setup, from the picks
+    def picked(label):
+        return next((m for m in pickable if label in PICKED.get(m["key"], [])), None)
+    ev64 = picked("Best everyday pick (40+ tok/s)")
+    un64 = picked("Unattended agent (real-world cases)")
+    sp = picked("Spanish writing")
+    vis = picked("Vision and OCR")
+    air_chat = picked("MacBook Air (24 GB), chat and writing")
+    air_ag = picked("MacBook Air (24 GB), agents and coding")
+    out = ["## How to choose", "",
+           "The tables answer \"which model is best\". This part answers the question I actually had: which one do I load today. "
+           "It is written from the numbers above, for Macs like this one.", "",
+           "**1. Start from memory, not from the leaderboard.** The number that matters is what the model needs at the context you really use "
+           "(the tables use 64k; agent apps with big system prompts need that much). Leave room for macOS and your apps: about a third of the RAM "
+           "on a 16 or 24 GB Mac, 30% on 32 GB and up. Everything in the table below fits that budget; everyday means the best combined quality, "
+           "agent and real-cases score at 40 tok/s or more. Speed on a smaller Mac scales with its memory "
+           "bandwidth: an M2 Air runs these at roughly a third of the tok/s shown here, and much less once it starts swapping (on the Air, 4B models "
+           "fell from 30 to 7 tok/s under 17 GB of swap).", "", t_tiers, "",
+           f"**2. Read the real-cases column, not the agent column.** {sat} of {len(fdone)} models score 95 or more on the main agent suite, so it no "
+           f"longer separates them. The real cases still spread from {fs[0]:.0f} to {fs[-1]:.0f}, and the slips count is the one number I check before "
+           "letting a model run unattended: a model that is right 98% of the time but stamps the wrong invoice once is not a model for unattended "
+           "work. For chat and writing the quality column is enough. For an interactive agent, where you watch it, speed per task matters as much as "
+           "the score: a 20 s model you can correct beats a 100 s model you wait for.", ""]
+    if quant_lines:
+        out += [f"**3. The 4-bit K quant is enough.** Same weights, bigger file, side by side ({len(pairs)} pairs here):", ""] + quant_lines + ["",
+                (f"Q8 beat Q4 on the real cases by more than noise in {q8_wins} of {len(pairs)} pairs. " if pairs else "")
+                + "So: take Q4_K_M (or the 4-bit MLX build), and spend the memory on context or on the next model size up. Below 4 bits it "
+                "depends on the model" + (f": {nm(lowbest)} at {lowbest.get('quant')} still scored {f(lowbest.get('field_score'), 0)} on the real cases, "
+                f"while the other {len(low) - 1} rows under 3 bits averaged {f(mean([m.get('field_score') or 0 for m in low if m is not lowbest]), 0)}" if len(low) >= 2 else "")
+                + ", so a 1 or 2 bit quant is worth it for a big model that would not fit otherwise, not as a way to save memory on a mid-size one.", ""]
+    out += ["**4. GGUF first, MLX when it is the only build or for vision.** On this Mac llama.cpp (GGUF) keeps the prompt cache better: a "
+            f"follow-up turn on the same long prefix started {f(cg, 0)}x faster than cold on GGUF and {f(cmx, 0)}x on MLX (medians). "
+            f"{text_mlx} of {len(mx)} MLX rows sometimes wrote tool calls as plain text that the server could not parse, against {text_gg} of {len(gg)} GGUF rows. "
+            "MLX builds of the MoE models generate faster (Ornith 35B: 62 vs 52 tok/s), so for pure chat they are fine. oMLX, LM Studio's third engine, "
+            "is covered in its own section below: it did not pay off here.", "",
+            "**5. Keep one model warm.** I do not want models loading and unloading all day. The prompt cache is the reason: with a 55k-token "
+            "prefix already read, the next question on the same material starts in under a second on GGUF (see \"Prompt cache with a long prefix\"), "
+            f"while a cold load takes {f(med(loads), 0)} s (median first load here) plus reading the prefix again. So the practical unit is not \"the best "
+            "model\" but \"the best model I can leave loaded all day next to my apps\". On 64 GB that is one 25 to 30 GB model at 64k plus the "
+            "embedding model; on 24 GB it is one 10 to 14 GB model at 32k.", ""]
+    df = [m for m in pickable if m.get("dfull_tg") and not str(m["key"]).endswith("@omlx")]
+    if df:
+        worst = max(df, key=lambda m: m.get("dfull_mem_peak") or 0)
+        bits = "; ".join(f"{nm(m)} read {(m.get('dfull_tokens') or 0) / 1000:.0f}k tokens in {f((m.get('dfull_ttft') or 0) / 60, 0)} min, then wrote at {f(m.get('dfull_tg'))} tok/s, peak {f(m.get('dfull_mem_peak'), 0)} GB"
+                         for m in sorted(df, key=lambda m: -(m.get('dfull_mem_peak') or 0))[:4])
+        out += ["**A note on \"256k context\".** The picks were filled to the top of their real window once (the \"Full context\" table). It works, and "
+                f"every one of them still found the hidden fact, but it is not an everyday setting: {bits}. "
+                f"At that point {nm(worst)} has the whole machine ({f(worst.get('dfull_mem_peak'), 0)} of {env.get('ram_gb', 64)} GB) and nothing else fits. "
+                "Plan around 64k, use 128k when a document needs it, and treat the full window as a once-in-a-while tool, not a default.", ""]
+    mine = ["**6. My own setup, as a worked example.** M1 Max, 64 GB, LM Studio, one model loaded at a time:", ""]
+    if ev64:
+        mine.append(f"- Loaded all day: {nm(ev64)} ({f(need_gb(ev64))} GB at 64k, {f(ev64.get('tg_d8k'), 0)} tok/s, {f(ev64.get('field_score'), 0)} on the real cases, "
+                    f"{f(ev64.get('field_sec'), 0)} s per agent task). Chat, writing, interactive agents, and the model my agent apps talk to.")
+    if un64 and un64 is not ev64:
+        mine.append(f"- Anything that runs without me watching, or touches files I cannot get back: {nm(un64)} ({f(un64.get('field_score'), 0)} on the real cases, "
+                    f"{un64.get('field_slips', 0)} slip{'' if un64.get('field_slips', 0) == 1 else 's'} in {un64.get('field_runs', 0)} runs, {f(un64.get('tg_d8k'), 0)} tok/s). Slower, and that is fine for unattended work.")
+    if sp and sp is not ev64:
+        mine.append(f"- Spanish writing when it has to read well: {nm(sp)} (writing {f(sp['cats']['writing'] * 100, 0)}).")
+    if vis:
+        mine.append(f"- Screenshots, OCR, charts: {nm(vis)} (vision {f(vis.get('vision'), 0)}).")
+    if air_chat:
+        mine.append(f"- The MacBook Air (M2, 24 GB) runs {nm(air_chat)} for chat ({f(need_gb(air_chat))} GB)"
+                    + (f" and {nm(air_ag)} for agents ({f(need_gb(air_ag))} GB, {f(air_ag.get('field_score'), 0)} on the real cases)" if air_ag else "")
+                    + ", both at 32k context, since 24 GB does not hold a 64k KV cache next to the apps. Its agent app points at the Studio over the network "
+                    "when the Studio is awake and falls back to the Air's own model when it is not.")
+    mine.append("- Rules I keep: Q4_K_M unless the MLX build is the only one; never a second copy of a model; restart the Mac when swap passes "
+                "a few GB, because every speed number falls apart after that; and the model stays loaded, apps come and go around it.")
+    out += mine + [""]
+    out += ["**7. What this does not tell you.**", "",
+            "- It is one machine and one person's tasks. Half the tasks are in Spanish, the agent workspace is mine, and the real cases are rebuilt "
+            "from my assistants' mistakes. A different workload can rank these models differently.",
+            f"- {K} runs per task is enough for tiers, not for ranks: scores within about 3 points are ties. The picks got 10 runs per real case "
+            "so their slip counts mean something; the rest did not.",
+            "- Quality is 26 small tasks and is nearly saturated for the good models. Writing is judged by two other local models, so it is a "
+            "second opinion, not ground truth.",
+            "- Memory is LM Studio's load estimate, not a measured peak, and speed is at LM Studio's defaults with flash attention on. Other "
+            "settings, other engines and other versions move the numbers.",
+            "- The hard tier was added late and is still small (3 tasks). Treat it as a probe, not a score.",
+            "- Full-context and long-prefix numbers exist only for the picks, and only one run each.",
+            "- Models change weekly. Everything here is a snapshot of what was downloadable and loadable in LM Studio at the time.", ""]
+    return out
+
+
+def fullctx_sections(ok):
+    """Full-context fills, the oMLX note and the long-prefix cache table, for the picks."""
+    F = []
+    fm = [m for m in ok if m.get("dfull_tg")]
+    if fm:
+        F += ["## Full context (picks)", "",
+              "The picks, filled to the top of the largest context that actually loads (the whole window minus the answer), instead of the 128k cap above. "
+              "Where 'Loaded at' is below 'Native max', the full window did not fit in memory. One run each; memory is the peak during the run.", "",
+              table(["Model", "Engine", "Native max", "Loaded at", "Filled to", "TTFT (s)", "Prefill tok/s", "Gen tok/s", "Found the fact", "Peak mem (GB)", "Swap (MB)"],
+                    [[m["name"], m.get("engine") or "-", ctxk(m.get("dfull_native") or m.get("native_ctx")), ctxk(m.get("dfull_ctx")), f"{int(m['dfull_tokens']):,}" if m.get("dfull_tokens") else "-", f(m.get("dfull_ttft"), 0),
+                      f(m.get("dfull_pp"), 0), f(m.get("dfull_tg")), "-" if m.get("dfull_needle") is None else f"{m['dfull_needle']*100:.0f}%",
+                      f(m.get("dfull_mem_peak")), f(m.get("dfull_swap"), 0)] for m in sorted(fm, key=lambda m: -(m.get("dfull_tokens") or 0))]), ""]
+    om = [m for m in ok if str(m["key"]).endswith("@omlx")]
+    if om:
+        F += ["## oMLX, tried and set aside", "",
+              "LM Studio's oMLX engine was run on four picks (rows marked \"(oMLX)\" above) and then dropped from the bench. "
+              "It parses MLX models' tool calls better than the normal MLX engine and was fastest for Ornith 35B, but it scored lower on the "
+              "real cases, writes its prompt cache to the SSD (tens of GB after a long fill), left the normal MLX engine unable to load until "
+              "LM Studio restarted, and reused far less of a real agent prefix: with a 55k-token prefix a new question waited about 14 s on oMLX "
+              "against 0.3 s on llama.cpp. For an agent that stays loaded all day, that last number decides it. The rows stay as a record.", ""]
+    cl = [m for m in ok if m.get("cachel_cold")]
+    if cl:
+        F += ["## Prompt cache with a long prefix (picks)", "",
+              f"Same test as the prompt-cache table, with an agent-app sized prefix of about {CFG.get('cache_long_tokens', 55000):,} tokens "
+              "(what an agent app sends before the first message). One run each.", "",
+              table(["Model", "Engine", "Prefix (tokens)", "Cold start (s)", "Same prefix, new question (s)", "Next turn of the chat (s)", "Speedup"],
+                    [[m["name"], m.get("engine") or "-", f"{int(m['cachel_tokens']):,}" if m.get("cachel_tokens") else "-", f(m.get("cachel_cold"), 1), f(m.get("cachel_warm"), 2),
+                      f(m.get("cachel_cont"), 2), (f(m.get("cachel_speedup"), 0) + "x") if m.get("cachel_speedup") else "-"]
+                     for m in sorted(cl, key=lambda m: m.get("cachel_warm") or 9e9)]), ""]
+    return F
 
 
 def findings(ok, agents):
@@ -963,10 +1191,12 @@ def build():
     os.makedirs(os.path.join(OUT, "community"), exist_ok=True)
     chat = [m for m in M.values() if not m.get("embedding")]
     ok = [m for m in chat if not m.get("load_failed")]
+    # rows that can be picked or ranked: quality measured and not an engine-comparison row (those stay in the tables, labelled)
+    pickable = [m for m in ok if m.get("quality") is not None and not str(m["key"]).endswith("@omlx")]
     emb = [m for m in M.values() if m.get("embedding")]
     par = pareto(ok)
     ok.sort(key=lambda m: -(m.get("quality") or 0))
-    agents = sorted([m for m in ok if m.get("agent_n", 0) >= 12], key=lambda m: -(m.get("agent_score") or 0))
+    agents = sorted([m for m in pickable if m.get("agent_n", 0) >= 12], key=lambda m: -(m.get("agent_score") or 0))
     K = CFG.get("agent_trials", 3)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     inv = {}
@@ -977,7 +1207,7 @@ def build():
 
     # picks
     picks = []
-    bq = max([m.get("quality") or 0 for m in ok] or [0])
+    bq = max([m.get("quality") or 0 for m in pickable] or [0])
     PICKED.clear()
     def pick(label, m, why):
         if m:
@@ -988,18 +1218,18 @@ def build():
         if m.get("quality") is None:
             return None
         return (m["quality"] + m["agent_score"]) / 2 if m.get("agent_n", 0) >= 12 else m["quality"]
-    pick("Best overall", best(ok, overall, lambda m: m.get("n_cats", 0) >= 5),
+    pick("Best overall", best(pickable, overall, lambda m: m.get("n_cats", 0) >= 5),
          lambda m: f"{f(m['quality'],0)}% quality" + (f", {f(m['agent_score'],0)}% agent" if m.get("agent_score") is not None else "") + f", {f(m.get('tg_d8k'))} tok/s")
     def everyday(m):  # quality, agent and real-cases scores count equally; the base quality set alone is nearly saturated
         xs = [m.get("quality"), m.get("agent_score") if m.get("agent_n", 0) >= 12 else None,
               m.get("field_score") if (m.get("field_n") or 0) >= len(A.FIELD_TASKS) else None]
         xs = [x for x in xs if x is not None]
         return sum(xs) / len(xs) if xs else None
-    pick("Best everyday pick (40+ tok/s)", best(ok, everyday, lambda m: m.get("n_cats", 0) >= 5 and (m.get("tg_d8k") or 0) >= 40),
+    pick("Best everyday pick (40+ tok/s)", best(pickable, everyday, lambda m: m.get("n_cats", 0) >= 5 and (m.get("tg_d8k") or 0) >= 40),
          lambda m: f"{f(m['quality'],0)}% quality" + (f", {f(m['agent_score'],0)}% agent" if m.get("agent_score") is not None else "")
          + (f", {f(m['field_score'],0)}% real cases" if m.get("field_score") is not None else "") + f", {f(m.get('tg_d8k'))} tok/s")
-    pick("Spanish writing", best(ok, lambda m: m["cats"].get("writing")), lambda m: f"writing {f(m['cats']['writing']*100,0)}%")
-    pick("Coding", best(ok, lambda m: (m["cats"].get("coding") or 0) * 100 + (m.get("tg_d8k") or 0) / 100 if m["cats"].get("coding") is not None else None), lambda m: f"coding {f(m['cats']['coding']*100,0)}%")
+    pick("Spanish writing", best(pickable, lambda m: m["cats"].get("writing")), lambda m: f"writing {f(m['cats']['writing']*100,0)}%")
+    pick("Coding", best(pickable, lambda m: (m["cats"].get("coding") or 0) * 100 + (m.get("tg_d8k") or 0) / 100 if m["cats"].get("coding") is not None else None), lambda m: f"coding {f(m['cats']['coding']*100,0)}%")
     if agents:
         def agent_why(m):
             w = f"agent score {f(m['agent_score'], 0)}%, {f(m.get('agent_sec'), 0)} s per task"
@@ -1011,25 +1241,25 @@ def build():
             pick("Snappy agent (30 s or less per task)", snappy, agent_why)
         fdone = [m for m in agents if (m.get("field_n") or 0) >= len(A.FIELD_TASKS)]
         if len(fdone) >= 3:
-            pick("Unattended agent (real-world cases)", best(fdone, lambda m: (m.get("field_score") or 0) - 5 * (m.get("field_slips") or 0) + (m.get("field_pass_k") or 0) / 1000),
-                 lambda m: f"{f(m['field_score'], 0)}% on the real cases, {m.get('field_slips', 0)} serious slips in {m.get('field_runs', 0)} runs, {f(m.get('field_sec'), 0)} s per task")
+            pick("Unattended agent (real-world cases)", best(fdone, lambda m: (m.get("field_score") or 0) - 150 * slip_rate(m) + (m.get("field_pass_k") or 0) / 1000),
+                 lambda m: f"{f(m['field_score'], 0)}% on the real cases, {m.get('field_slips', 0)} serious slip{'' if m.get('field_slips', 0) == 1 else 's'} in {m.get('field_runs', 0)} runs, {f(m.get('field_sec'), 0)} s per task")
         pick("Coding agent", best(agents, lambda m: (m["agent_cats"]["coding"] * 100 - (m.get("agent_sec") or 0) / 1000) if m["agent_cats"].get("coding") is not None else None,
                                   lambda m: (m.get("agent_score") or 0) >= 95),
              lambda m: f"fixed the repos in {f(m['agent_cats']['coding'] * 100, 0)}% of runs, {f(m.get('agent_sec'), 0)} s per task")
     else:
-        pick("Agents and tools", best(ok, lambda m: ((m["cats"].get("tools") or 0) + (m["cats"].get("json") or 0)) if m["cats"].get("tools") is not None else None), lambda m: f"tools {f(m['cats']['tools']*100,0)}%, JSON {f((m['cats'].get('json') or 0)*100,0)}%")
-    pick("Fastest that's still good", best(ok, lambda m: m.get("tg_d8k"), lambda m: (m.get("quality") or 0) >= 0.75 * bq), lambda m: f"{f(m['tg_d8k'])} tok/s, {f(m.get('quality'),0)}% quality")
+        pick("Agents and tools", best(pickable, lambda m: ((m["cats"].get("tools") or 0) + (m["cats"].get("json") or 0)) if m["cats"].get("tools") is not None else None), lambda m: f"tools {f(m['cats']['tools']*100,0)}%, JSON {f((m['cats'].get('json') or 0)*100,0)}%")
+    pick("Fastest that's still good", best(pickable, lambda m: m.get("tg_d8k"), lambda m: (m.get("quality") or 0) >= 0.75 * bq), lambda m: f"{f(m['tg_d8k'])} tok/s, {f(m.get('quality'),0)}% quality")
     def _recall(m):
         xs = [m.get(k) for k in ("needle_d8k", "needle_d32k", "needle_d60k", "dmax_needle")]
         xs = [x for x in xs if x is not None]
         return sum(xs) / len(xs) if len(xs) >= 3 else None
-    pick("Long documents", best(ok, lambda m: (_recall(m) * 1000 + (m.get("pp_d32k") or 0) / 10) if _recall(m) is not None else None,
+    pick("Long documents", best(pickable, lambda m: (_recall(m) * 1000 + (m.get("pp_d32k") or 0) / 10) if _recall(m) is not None else None,
                                 lambda m: (m.get("quality") or 0) >= 0.8 * bq and (m.get("dmax_tokens") or 0) >= 100000),
          lambda m: f"found the hidden fact up to {ctxk(m.get('dmax_tokens'))}, reads {f(m.get('pp_d32k'),0)} tok/s at 32k")
-    pick("Vision and OCR", best(ok, lambda m: m.get("vision")), lambda m: f"vision {f(m['vision'],0)}%")
+    pick("Vision and OCR", best(pickable, lambda m: m.get("vision")), lambda m: f"vision {f(m['vision'],0)}%")
     # fits a 24 GB MacBook Air with room for apps, and generates at 25+ tok/s here (the Air's bandwidth is about a quarter of this Mac's)
     air = lambda m: (m.get("mem_gb") or 99) <= 14 and (m.get("tg_d8k") or 0) >= 25
-    pick("MacBook Air (24 GB), chat and writing", best(ok, everyday, air),
+    pick("MacBook Air (24 GB), chat and writing", best(pickable, everyday, air),
          lambda m: f"{f(m.get('mem_gb'))} GB, {f(m.get('quality'),0)}% quality, {f(m.get('tg_d8k'))} tok/s here")
     pick("MacBook Air (24 GB), agents and coding", best(agents, lambda m: (m.get("agent_score") or 0) + (m.get("field_score") or 0) + (m.get("agent_pass_k") or 0) / 1000, air),
          lambda m: f"{f(m.get('mem_gb'))} GB, {f(m.get('agent_score'),0)}% agent, {f(m.get('field_score'),0)}% real cases, {f(m.get('tg_d8k'))} tok/s here")
@@ -1061,6 +1291,8 @@ def build():
     fnd = findings(ok, agents)
     if fnd:
         L += ["## Findings", "", *[f"- {x}" for x in fnd], ""]
+    guide = guide_sections(ok, pickable, agents, env, K)
+    L += guide
     if has_chart:
         L += ["## Quality vs speed", "", "![[charts/speed_vs_quality.svg]]", ""]
     if has_agent_chart:
@@ -1085,6 +1317,7 @@ def build():
     L += [""]
     L += agent_sections(ok, agents, K)
     L += field_sections(ok, K)
+    L += hard_sections(ok, K)
     L += quant_sections(ok, K)
     # speed detail
     hdr = ["Model", "Load first (s)", "Load repeat (s)", "TTFT short (s)", "Gen short", "Spread %", "Prefill @8k", "Gen @8k", "Prefill @32k", "Gen @32k", "TTFT @60k (s)", "Gen @60k", "Watts", "Tok/J"]
@@ -1101,6 +1334,7 @@ def build():
         rec = " / ".join("-" if m.get(k) is None else f"{m[k]*100:.0f}%" for k in ("needle_d8k", "needle_d32k", "needle_d60k", "dmax_needle"))
         rws.append([m["name"], ctxk(m.get("native_ctx")), ctxk(m.get("ctx_std")), f(m.get("mem_gb")), ctxk(m.get("ctx_max_loaded")),
                     f(m.get("mem_max_gb")), ctxk(m.get("dmax_tokens")), f(m.get("dmax_ttft"), 0), f(m.get("dmax_tg")), rec])
+    L += fullctx_sections(ok)
     L += ["## Context", "", "Every model runs at a 64k agent context (65,536 tokens), then at the largest context that loads, filled up to 128k. Recall checks whether the model finds a fact hidden in the middle of the text. Memory is LM Studio's estimate; for MLX models that estimate doesn't grow with context, so expect more than shown when you actually fill a long context.", "", table(hdr, rws), ""]
     # thinking
     hdr = ["Model", "Median seconds per task", "Avg reasoning tokens", "Time to first answer token (s)", "Ran out of tokens before answering", "Agent: tokens per task", "Agent: s per task"]
@@ -1213,6 +1447,18 @@ def build():
                                   f(task_mean(xs) * 100, 0), str(sum(1 for x in xs if A.slipped(t["id"], x.get("note")))),
                                   f(med([x.get("t_total") for x in xs]), 0), str(xs[-1].get("skipped") or xs[-1].get("note") or "").replace("|", "/")[:70]])
                 body[ins:ins] = ["", "## Real-world cases", "", table(["Task", "Category", "Solved", "Score", "Slips", "Median s", "Last run"], frows), ""]
+            hxt = m.get("hard_tasks") or {}
+            if hxt:
+                ins = len(body) - 2
+                hrows = []
+                for t in A.HARD_TASKS:
+                    xs = hxt.get(t["id"])
+                    if not xs:
+                        continue
+                    hrows.append([t["id"].replace("hx_", ""), A.HARD_CATS[t["cat"]], f"{sum(1 for x in xs if x.get('solved'))}/{len(xs)}",
+                                  f(task_mean(xs) * 100, 0), str(sum(1 for x in xs if A.slipped(t["id"], x.get("note")))),
+                                  f(med([x.get("t_total") for x in xs]), 0), str(xs[-1].get("skipped") or xs[-1].get("note") or "").replace("|", "/")[:70]])
+                body[ins:ins] = ["", "## Hard tier", "", table(["Task", "Category", "Solved", "Score", "Slips", "Median s", "Last run"], hrows), ""]
             for t in ("write_email_es", "write_post_es", "summary_es"):
                 if trs.get(t, {}).get("answer"):
                     body += [f"> [!quote]- {t}", *["> " + l for l in trs[t]["answer"].strip().splitlines()], ""]
@@ -1252,7 +1498,10 @@ views:
             "needle_d60k", "dmax_needle", "quality", "vision", "sec_per_task", "reason_tokens", "img_overhead_s",
             "agent_score", "agent_pass_k", "agent_pass1", "agent_valid_pct", "agent_steps", "agent_sec", "agent_tokens", "agent_parallel",
             "agent_text_calls", "agent_timeouts", "field_score", "field_pass_k", "field_slips", "field_runs", "field_sec",
-            "cache_tokens", "cache_cold", "cache_warm", "cache_cont", "cache_speedup"]
+            "hard_score", "hard_pass_k", "hard_slips", "hard_runs", "hard_sec",
+            "cache_tokens", "cache_cold", "cache_warm", "cache_cont", "cache_speedup",
+            "dfull_ctx", "dfull_tokens", "dfull_ttft", "dfull_pp", "dfull_tg", "dfull_needle", "dfull_mem_peak",
+            "cachel_tokens", "cachel_cold", "cachel_warm", "cachel_cont", "cachel_speedup"]
     with open(os.path.join(cdir, "results.csv"), "w", newline="") as fcsv:
         w = csv.writer(fcsv)
         w.writerow(cols)
@@ -1262,10 +1511,10 @@ views:
         w = csv.writer(fcsv)
         w.writerow(["model", "tier", "task", "category", "runs", "solved", "mean_score", "serious_slips", "median_seconds", "median_steps", "median_completion_tokens"])
         for m in ok:
-            for tier, d in (("main", m.get("agent_tasks") or {}), ("real_cases", m.get("field_tasks") or {})):
+            for tier, d in (("main", m.get("agent_tasks") or {}), ("real_cases", m.get("field_tasks") or {}), ("hard", m.get("hard_tasks") or {})):
                 for tid, xs in sorted(d.items()):
                     w.writerow([m["key"], tier, tid, A.TASK_BY_ID[tid]["cat"], len(xs), sum(1 for x in xs if x.get("solved")), round(task_mean(xs), 3),
-                                sum(1 for x in xs if A.slipped(tid, x.get("note"))) if tier == "real_cases" else "",
+                                sum(1 for x in xs if A.slipped(tid, x.get("note"))) if tier in ("real_cases", "hard") else "",
                                 med([x.get("t_total") for x in xs]), med([x.get("steps") for x in xs]), med([x.get("completion_tokens") for x in xs])])
     try:
         with open(RESULTS, encoding="utf-8") as src, open(os.path.join(cdir, "results.jsonl"), "w", encoding="utf-8") as dst:
@@ -1307,18 +1556,23 @@ views:
     engines = sorted({m.get("engine") for m in ok if m.get("engine")})
     fnd = findings(ok, agents)
     # the short version: what to run for what, and a compact leaderboard sorted by the hardest tier
-    ranked = sorted([m for m in ok if (m.get("field_n") or 0) >= len(A.FIELD_TASKS)], key=lambda m: -(m.get("field_score") or 0))
+    ranked = sorted([m for m in pickable if (m.get("field_n") or 0) >= len(A.FIELD_TASKS) and m.get("tg_d8k")], key=lambda m: -(m.get("field_score") or 0))
     t_top = table(["Model", "Mem @64k GB", "Real cases %", "Agent %", "Quality %", "tok/s"],
                   [[nm(m), f(m.get("mem_gb")), f(m.get("field_score"), 0), f(m.get("agent_score"), 0), qcell(m), f(m.get("tg_d8k"), 0)]
                    for m in ranked[:12]]) if len(ranked) >= 5 else ""
     quick = [strip(p) for p in picks[:8]]
-    readme = [f"# M1 Max 64 GB: {len(ok)} local models in LM Studio, {len(agents)} of them also tested as agents ({datetime.now():%B %Y})", "",
+    def _base(k):  # one model may appear as several rows: quants (@q8_0), the MLX build (-mlx) and engine rows (@omlx)
+        return re.sub(r"(@[^@]+|-mlx)$", "", str(k).split("/")[-1].lower())
+    n_distinct = len({_base(m["key"]) for m in ok})
+    readme = [f"# M1 Max 64 GB: {len(ok)} rows ({n_distinct} distinct models, plus quant and engine variants) in LM Studio, {len(agents)} of them also tested as agents ({datetime.now():%B %Y})", "",
               f"Hardware: {env.get('chip', 'Apple M1 Max')} (32-core GPU), {env.get('ram_gb', 64)} GB, macOS {env.get('macos', '')}. "
               f"LM Studio {env.get('lmstudio_app', '')}; engines used: {', '.join(engines) or '-'}.", ""]
     if quick:
-        readme += ["## What to run", "", "Picks from the tables below. Memory is at a 64k context; real cases is the tier rebuilt from real agent failures and the one that separates models most.", ""] + quick + [""]
+        readme += ["## What to run", "", "This is a practical guide first, made for one person's Mac and kept as a record of what's worth using on it. "
+                   "Picks from the tables below. Memory is at a 64k context; real cases is the tier rebuilt from real agent failures and the one that separates models most.", ""] + quick + [""]
     if t_top:
         readme += ["## Top 12 by real cases", "", t_top, "", "Scores are out of 100. Differences under about 3 points are noise.", ""]
+    readme += guide
     if fnd:
         readme += ["## Findings", ""] + [f"- {x}" for x in fnd] + [""]
     if agents:
@@ -1328,6 +1582,7 @@ views:
         readme += ["## Real-world failure tier", "", f"{len(A.FIELD_TASKS)} more tasks, each rebuilt (anonymized) from a mistake a real assistant made "
                    "on my setup: checking before irreversible steps, staying in scope, trusting the live system over old notes, and not "
                    f"claiming more than was done. 'Serious slips' = runs that {A.SLIP_TEXT}.", "", t_field, ""]
+    readme += hard_sections(ok, K)
     qs = quant_sections(ok, K)
     if qs:
         readme += qs
@@ -1335,16 +1590,19 @@ views:
     if t_cache:
         readme += ["## Prompt cache", "", "Agent apps resend the same long prefix every turn (system prompt + tool list). "
                    "Cold start = first time a ~12k-token prefix is read; next turn = the same chat one turn later.", "", t_cache, ""]
+    readme += fullctx_sections(ok)
     readme += ["## The agent tasks", "", "A simulated workspace (notes, contacts, calendar, email inbox, files, meeting rooms, sales data, two small "
                "Python repos). Tool results are deterministic, so every run can be replayed and re-graded. Half the tasks are in Spanish.", "", t_tasks, "",
                "## The real-world cases", "", "Same harness, a drive of documents, slides and an assistant config added to the workspace.", "", t_ftasks, "",
                "## How it was measured", "",
                "- One model loaded at a time with an explicit 64k context (65,536). GGUF with flash attention, default KV cache.",
                "- Speed: short prompt (1 warmup + 5 runs), 8k (3 runs), 32k (2), 60k (1). Medians. Temperature 0, output capped at 256 or 512 tokens, unique prefix per run so nothing is cached.",
-               "- Then each model is loaded at the largest context that fits (native max, stepping down) and filled up to 128k tokens once. Recall: a 6-digit code hidden halfway through Don Quijote text.",
+               "- Then each model is loaded at the largest context that fits (native max, stepping down) and filled up to 128k tokens once. Recall: a 6-digit code hidden halfway through Don Quijote text. "
+               "The picks were also filled to their real largest context (256k for most) and given a prompt-cache run with a 55k-token prefix, the size an agent app's system prompt reaches; one run each.",
                "- Quality: 26 short tasks (instruction following, JSON extraction, single tool calls, Python with unit tests, reasoning, Spanish writing and summaries, 5 vision tasks). Mostly auto-graded; writing is also scored by two local judge models from other families.",
                f"- Agents: native tool calls through LM Studio's OpenAI-compatible API, temperature {CFG.get('agent_temperature', 0.6)}, {CFG.get('agent_max_tokens', 8192)} output tokens per turn, "
-               f"30 minutes per run, {K} runs per task with different seeds. A run counts as solved at {int(A.PASS * 100)}% or more of its checks.",
+               f"30 minutes per run, {K} runs per task with different seeds ({CFG.get('final_fx_trials') or K} on the real cases for the picks). A run counts as solved at {int(A.PASS * 100)}% or more of its checks.",
+               "- Hard tier: 3 tasks added in November, 3 runs each, with a 16k-token output budget per step for the reconciliation task. Scored separately; small sample.",
                "- Memory is LM Studio's estimate for loading at that context (weights plus KV cache). The GPU wired limit was left at the macOS default.",
                "- Ran unattended with the Mac idle; any test interrupted by user input was repeated.",
                "- It's one person's test set on one machine. Differences of a few points are noise; read it as tiers.", "",
@@ -1355,7 +1613,7 @@ views:
                "3. `./run.sh --background --now` runs every downloaded model (it's resumable; `tail -f data/run.log` to watch).",
                "4. Your results end up in `report/community/` in this same format. Post them; numbers from other Macs are the most useful part.", "",
                "## Files", "", "- `results.csv`: one row per model.", "- `agent_tasks.csv`: one row per model and agent task.",
-               "- `agent_tasks.csv` has a `tier` column: `main` or `real_cases`.",
+               "- `agent_tasks.csv` has a `tier` column: `main`, `real_cases` or `hard`.",
                "- `results.jsonl`: every individual run, including answers and full agent traces.", "- `LocalLlmBench-harness.zip`: the harness.", ""]
     open(os.path.join(cdir, "README.md"), "w", encoding="utf-8").write("\n".join(readme))
     title = (f"I tested {len(agents)} local models on an M1 Max 64GB as agents ({len(A.TASKS)} multi-step tool tasks"
@@ -1363,6 +1621,9 @@ views:
              if agents else f"M1 Max 64GB benchmark: {len(ok)} models in LM Studio at 64k context, plus max context and a small quality test")
     repo = CFG.get("repo_url") or "[link to repo]"
     post = [f"Title: {title}", "", "Body:", "",
+            "I made this for myself first: a practical guide and a record of which local models are worth using on my Mac. There were too many "
+            "models and too little info about this specific machine, and I was going a bit insane picking them by vibes. Sharing it in case your "
+            "Mac looks like mine.", "",
             "tok/s doesn't tell you whether a model can run an agent, so I built an unattended harness and ran my whole LM Studio library through it "
             f"on an M1 Max 64 GB: speed and memory at the same 64k context, max context, a quality set, {len(A.TASKS)} multi-step tool tasks in a "
             f"simulated workspace, and {len(A.FIELD_TASKS)} tasks rebuilt from mistakes my own assistants actually made (stamping invoices without "

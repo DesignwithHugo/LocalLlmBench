@@ -10,7 +10,7 @@ Usage:  ./run.sh            (waits for the night window and an idle Mac)
         ./run.sh --smoke    (quick check on the smallest model, then report)
         ./run.sh --report   (only rebuild the report)
 """
-import argparse, base64, collections, copy, hashlib, json, os, random, re, subprocess, sys, threading, time, traceback
+import shutil, argparse, base64, collections, copy, hashlib, json, os, random, re, subprocess, sys, threading, time, traceback
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +45,16 @@ DEFAULTS = {
     "heavy_use_pause": False, "heavy_window_s": 300, "heavy_sample_s": 30, "heavy_active_frac": 0.6, "heavy_cpu_pct": 150,
     # max-context fill: if set, step the context down until LM Studio's memory estimate fits under this many GB
     "dmax_mem_cap_gb": None,
+    # oMLX comparison (Nov 2026): MLX models whose key contains one of these also run a second time on LM Studio's oMLX
+    # engine, as a separate row "<key>@omlx" (speed, quality, prompt cache, one pass of each agent tier)
+    "omlx_models": [],
+    # full-context tests (Nov 2026), only for models whose key contains one of these: one fill at the largest context that
+    # loaded (dfull, up to full_fill_cap_tokens) and a prompt-cache run with an agent-app sized prefix (cache_long)
+    "full_context_models": [], "full_fill_cap_tokens": 1048576, "cache_long_tokens": 55000,
+    # final push (Nov 2026): the picks, by exact key. While any of them has work left, they run before every other
+    # model, in phase groups: real cases (with final_fx_trials runs per task instead of agent_trials), then the hard
+    # tier, then the base tests (full context), then the agent suite. Other models continue afterwards as usual.
+    "final_models": [], "final_fx_trials": 3, "final_phase_groups": [[3, 4], [5, 6], [0], [1, 2]],
 }
 CFG = dict(DEFAULTS)
 _cfg_path = os.path.join(HERE, "config.json")
@@ -204,6 +214,14 @@ def heavy_loop():
 
 def check_pause():
     """Called between tests. Raises Paused if the user is back or the window closed; exits cleanly if data/STOP exists."""
+    if os.path.exists(os.path.join(DATA, "RESTART")):  # pick up code/config changes now, not at the next model boundary
+        try:
+            os.remove(os.path.join(DATA, "RESTART"))
+        except OSError:
+            pass
+        log("RESTART file found: unloading and restarting after the current test")
+        L.unload_all()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
     if os.path.exists(os.path.join(DATA, "STOP")):
         log("STOP file found: unloading and exiting after the current test")
         L.unload_all()
@@ -383,12 +401,40 @@ def std_ctx(m):
     return min(CFG["ctx_standard"], mx) if mx else CFG["ctx_standard"]
 
 
+def full_ctx(m):
+    pats = [x.lower() for x in CFG.get("full_context_models") or []]
+    return bool(pats) and not m["type"].startswith("embed") and any(x in m["key"].lower() for x in pats)
+
+
+def final_model(m):
+    return m["key"] in (CFG.get("final_models") or [])
+
+
+def fx_trials(m):
+    return max(CFG["agent_trials"], CFG.get("final_fx_trials") or 0) if final_model(m) else CFG["agent_trials"]
+
+
 def plan(m):
     """Ordered list of (test, rep)."""
     if m["type"].startswith("embed"):
         return [("emb_load", 0), ("emb_speed", 0), ("emb_retrieval", 0)]
     p = [("load_std", 0), ("calib", 0)]
     p += [("short", r) for r in range(CFG["short_reps"] + 1)]  # rep 0 = warmup
+    if m.get("engine") == "omlx":
+        # same file on the oMLX engine: speed, text quality, prompt cache and one run of each agent tier
+        p += [("d8k", r) for r in range(CFG["reps_8k"])]
+        if std_ctx(m) >= 40000:
+            p += [("d32k", r) for r in range(CFG["reps_32k"])]
+        if std_ctx(m) >= 65536:
+            p += [("d60k", r) for r in range(CFG["reps_60k"])]
+        p += [("q:" + t["id"], 0) for t in T.tasks() if t["kind"] != "vision"]
+        p += [("ag_cache", r) for r in range(CFG["cache_reps"])]
+        if full_ctx(m):
+            p += [("dfull", 0), ("cache_long", 0)]
+        p += [("ag:" + t["id"], 0) for t in A.TASKS]
+        p += [("fx:" + t["id"], 0) for t in A.FIELD_TASKS]
+        p += [("hx:" + t["id"], 0) for t in A.HARD_TASKS]
+        return p
     p += [("d8k", r) for r in range(CFG["reps_8k"])]
     if std_ctx(m) >= 40000:
         p += [("d32k", r) for r in range(CFG["reps_32k"])]
@@ -401,33 +447,43 @@ def plan(m):
             continue
         p.append(("q:" + t["id"], 0))
     p += [("load_repeat", 0), ("load_max", 0), ("dmax", 0)]
+    if full_ctx(m):
+        p += [("dfull", 0), ("cache_long", 0)]
     p += [("ag_cache", r) for r in range(CFG["cache_reps"])]
     for t in A.TASKS:
         p += [("ag:" + t["id"], r) for r in range(CFG["agent_trials"])]
-    for t in A.FIELD_TASKS:  # real-cases tier, scored separately
-        p += [("fx:" + t["id"], r) for r in range(CFG["agent_trials"])]
+    for t in A.FIELD_TASKS:  # real-cases tier, scored separately (more runs for the final picks)
+        p += [("fx:" + t["id"], r) for r in range(fx_trials(m))]
+    for t in A.HARD_TASKS:  # hard tier (Nov 2026), scored separately
+        p += [("hx:" + t["id"], r) for r in range(CFG["agent_trials"])]
     if ARGS.smoke:
         keep = {"load_std", "calib", "short", "d8k", "q:if_json_only", "q:tool_weather_es", "q:code_contrast",
                 "q:write_email_es", "vis_encode", "q:vis_ui_es", "load_repeat", "ag_cache", "ag:ag_room_recovery",
                 "ag:ag_big_toolset", "ag:ag_code_fix", "fx:fx_shared_log"}
-        p = [(t, r) for t, r in p if t in keep and r <= (0 if t.startswith(("ag", "fx")) else 2)]
+        p = [(t, r) for t, r in p if t in keep and r <= (0 if t.startswith(("ag", "fx", "hx")) else 2)]
     return p
 
 
 def phase_of(test, rep):
     """0 = base speed/quality tests, 1 = agent suite first pass + prefix cache, 2 = agent reliability trials,
-    3 = real-cases tier first pass, 4 = real-cases reliability trials."""
+    3 = real-cases tier first pass, 4 = real-cases reliability trials, 5 = hard tier first pass, 6 = hard tier reliability trials."""
     if test == "ag_cache":
         return 1
     if test.startswith("ag:"):
         return 1 if rep == 0 else 2
     if test.startswith("fx:"):
         return 3 if rep == 0 else 4
+    if test.startswith("hx:"):
+        return 5 if rep == 0 else 6
     return 0
 
 
-def pending(m, done, max_phase=4):
-    return [(t, r) for t, r in plan(m) if phase_of(t, r) <= max_phase and (m["key"], t, r) not in done]
+LAST_PHASE = 6
+
+
+def pending(m, done, max_phase=LAST_PHASE, phases=None):
+    return [(t, r) for t, r in plan(m) if phase_of(t, r) <= max_phase and (phases is None or phase_of(t, r) in phases)
+            and (m["key"], t, r) not in done]
 
 
 # ---------------------------------------------------------------- running a model
@@ -453,8 +509,144 @@ class Ctx:
         return False
 
 
+
+# ---------------------------------------------------------------- oMLX engine switching (Nov 2026)
+
+BACKENDS = os.path.expanduser("~/.lmstudio/extensions/backends")
+ENGINE_PREFS = os.path.expanduser("~/.lmstudio/.internal/backend-preferences-v1.json")
+ENGINE_SAVED = os.path.join(DATA, "mlx_engine_saved.json")
+
+
+def engine_prefs():
+    """model format -> 'name@version' of the engine LM Studio uses for it. LM Studio 0.4.27+ keeps this in
+    backend-preferences-v2.json ({formatDefaults, versions}); older versions in v1 (a list)."""
+    try:
+        d = json.load(open(ENGINE_PREFS.replace("-v1.json", "-v2.json")))
+        return {fmt: f"{name}@{d.get('versions', {}).get(name, '?')}" for fmt, name in (d.get("formatDefaults") or {}).items()}
+    except Exception:
+        pass
+    try:
+        return {e["model_format"]: f"{e['name']}@{e['version']}" for e in json.load(open(ENGINE_PREFS))}
+    except Exception:
+        return {}
+
+
+def newest_engine(prefix):
+    def ver(v):
+        return tuple(int(x) if x.isdigit() else 0 for x in re.split(r"[.\-]", v))
+    try:
+        found = [d[len(prefix) + 1:] for d in os.listdir(BACKENDS) if d.startswith(prefix + "-") and d[len(prefix) + 1:][:1].isdigit()]
+    except Exception:
+        found = []
+    return f"{prefix}@{max(found, key=ver)}" if found else None
+
+
+def ensure_mlx_engine(want_omlx):
+    """Point LM Studio's MLX (safetensors) models at oMLX or back at the engine that was selected before.
+    Returns True when the selection is confirmed in LM Studio's preferences."""
+    cur = engine_prefs().get("safetensors") or ""
+    if want_omlx:
+        target = CFG.get("omlx_engine") or newest_engine("omlx-mac-arm64-apple-metal-advsimd")
+        if cur and not cur.startswith("omlx"):
+            json.dump({"spec": cur, "ts": datetime.now().isoformat(timespec="seconds")}, open(ENGINE_SAVED, "w"))
+    else:
+        if not cur.startswith("omlx"):
+            return True
+        try:
+            target = json.load(open(ENGINE_SAVED))["spec"]
+        except Exception:
+            target = CFG.get("mlx_engine") or newest_engine("mlx-llm-mac-arm64-apple-metal-advsimd")
+    if not target:
+        log("  engine switch: no installed engine found"); return False
+    if cur == target:
+        return True
+    L.unload_all()
+    rc, out = L.lms("runtime", "select", target, timeout=120)
+    time.sleep(3)
+    now = engine_prefs().get("safetensors") or ""
+    log(f"  engine for MLX models: {cur or '?'} -> {target} (rc={rc}, now {now or '?'})")
+    if now != target:
+        log(f"  engine switch not confirmed: {out.strip()[-300:]}")
+    return now == target
+
+
+OMLX_CACHE = os.path.expanduser("~/.lmstudio/.internal/prompt-cache/omlx")
+
+
+def clear_omlx_cache(why):
+    """oMLX writes its prompt cache to the SSD (tens of GB after a 256k fill). It is only a cache, so it is emptied after
+    every oMLX row, once the engine has been switched back (Hugo, Nov 1). Files are truncated first so the space comes back
+    even if something still holds them open."""
+    if not os.path.isdir(OMLX_CACHE):
+        return
+    n, gb = 0, 0.0
+    for root, _, files in os.walk(OMLX_CACHE):
+        for fn in files:
+            p = os.path.join(root, fn)
+            try:
+                gb += os.path.getsize(p) / 1e9
+                with open(p, "r+b") as fh:
+                    fh.truncate(0)
+                os.remove(p)
+                n += 1
+            except Exception:
+                pass
+    try:
+        shutil.rmtree(OMLX_CACHE, ignore_errors=True)
+    except Exception:
+        pass
+    log(f"  oMLX cache cleared ({n} files, {gb:.1f} GB) {why}")
+
+
+def omlx_running(since):
+    """True if LM Studio's server log shows the oMLX engine pool loading a model at or after `since` (local time).
+    (A process check doesn't work: LM Studio starts oMLX through its bundled Python, so the command line has no 'omlx'.)"""
+    import glob
+    t0 = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since - 2))
+    files = sorted(glob.glob(os.path.expanduser("~/.lmstudio/server-logs/*/*.log")), key=os.path.getmtime)[-2:]
+    for f in reversed(files):
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(0, 2)
+                fh.seek(max(0, fh.tell() - 3_000_000))
+                tail = fh.read().decode("utf-8", "replace")
+        except Exception:
+            continue
+        for line in tail.splitlines():
+            if line[1:20] >= t0 and ("omlx.engine_pool:Pinned model" in line or "omlx.model_discovery:Discovered model" in line):
+                return True
+    return False
+
+
+def omlx_variants(models):
+    """For each MLX model matching config omlx_models, a second entry '<key>@omlx' that loads the same file on oMLX."""
+    pats = [x.lower() for x in CFG.get("omlx_models") or []]
+    out = []
+    for m in models:
+        if not pats or m["type"].startswith("embed") or m["key"].endswith("@omlx"):
+            continue
+        if "gguf" in (m.get("format") or "").lower() or (m.get("path") or "").lower().endswith(".gguf"):
+            continue
+        if any(x in m["key"].lower() for x in pats):
+            out.append(dict(m, key=m["key"] + "@omlx", load_key=m.get("load_key") or m["key"], engine="omlx"))
+    return out
+
+
 def load_m(c, ctx, ident, gguf):
     """Load c's model. A quant variant may only be loadable by its file path, so try the alternatives on 'not found'."""
+    if not gguf:
+        want = c.m.get("engine") == "omlx"
+        if not ensure_mlx_engine(want) and want:
+            return {"ok": False, "error": "could not switch MLX models to the oMLX engine", "wall_s": 0}
+    t_load = time.time()
+    r = _load_m(c, ctx, ident, gguf)
+    if r["ok"] and not gguf and c.m.get("engine") == "omlx" and not omlx_running(t_load):
+        L.unload_all()
+        return {"ok": False, "error": "loaded, but no oMLX engine process is running (it went to another engine)", "wall_s": r.get("wall_s")}
+    return r
+
+
+def _load_m(c, ctx, ident, gguf):
     r = L.load(c.load_key, ctx, ident, gguf)
     if r["ok"] or not re.search(r"not found|no model found", str(r.get("error", "")), re.I):
         return r
@@ -569,10 +761,10 @@ def slim(res, keep_answer=False):
     return d
 
 
-def run_model(m, max_phase=2):
+def run_model(m, max_phase=2, phases=None):
     c = Ctx(m)
     done = done_set()
-    todo = pending(m, done, max_phase)
+    todo = pending(m, done, max_phase, phases)
     if not todo:
         return
     log(f"== {m['key']}  ({m.get('format')}, {round((m.get('size_bytes') or 0)/1e9,1)} GB, max ctx {m.get('max_ctx')}) {len(todo)} tests left")
@@ -726,6 +918,73 @@ def run_model(m, max_phase=2):
                 run_with_retry(m, test, rep, f)
                 continue
 
+            if test == "dfull":
+                # one fill at the largest context that actually loaded (dmax stops at max_fill_cap_tokens, 128k by default)
+                base_key = c.key[:-5] if c.key.endswith("@omlx") else c.key  # engine rows reuse the base row's largest-context result
+                lm = next((r for r in load_results() if r.get("model") == base_key and r.get("test") == "load_max" and r.get("final")), None)
+                mx_ctx = (lm or {}).get("ctx") or ctx
+                native = native_ctx(m) or mx_ctx
+                # the real top limit: the whole window minus the answer and a small safety margin (dmax keeps a 10% margin
+                # because the tokens-per-char calibration can be off; here we try tight first and step down only on overflow)
+                fill = min(mx_ctx - CFG["gen_tokens_long"] - 1024, CFG["full_fill_cap_tokens"])
+                if fill <= min(int(mx_ctx * 0.9) - CFG["gen_tokens_long"], CFG["max_fill_cap_tokens"]):
+                    finish(m, test, rep, {"skipped": "dmax already filled this model's largest context", "ctx": mx_ctx}, ok=True)
+                    continue
+                if not c.ensure(mx_ctx):
+                    finish(m, test, rep, {"error": "could not reload at max context", "ctx": mx_ctx}, ok=False)
+                    continue
+                def f(fill=fill, mx_ctx=mx_ctx, native=native):
+                    tried = []
+                    for factor in (1.0, 0.97, 0.94):
+                        target = int(fill * factor)
+                        msgs, code = speed_prompt("dfull", c, rep, target)
+                        swap0 = L.swap_used_mb()
+                        with L.MemSampler() as ms:
+                            res = L.chat_stream(c.ident, msgs, max_tokens=CFG["gen_tokens_long"], timeout=14400)
+                        err = res.get("error")
+                        if err and re.search(r"context (length|size|window)|exceed|too (long|large)|n_ctx", str(err), re.I) and factor > 0.94:
+                            tried.append({"target_tokens": target, "error": str(err)[:200]})
+                            continue  # overshot the window: step down a little and try again
+                        if err:
+                            return False, {"error": err, "ctx": mx_ctx, "native_ctx": native, "target_tokens": target, "tried": tried}
+                        d = slim(res)
+                        d.update({"ctx": mx_ctx, "native_ctx": native, "target_tokens": target, "needle": needle_score(res, code),
+                                  "fill_pct": round(100 * (d.get("prompt_tokens") or target) / mx_ctx, 1), "tried": tried,
+                                  "mem_peak_gb": ms.peak, "gpu_peak_gb": ms.gpu_peak or None, "swap_delta_mb": (L.swap_used_mb() or 0) - (swap0 or 0)})
+                        return True, d
+                    return False, {"error": "prompt overflowed the window at every margin", "ctx": mx_ctx, "target_tokens": fill, "tried": tried}
+                run_with_retry(m, test, rep, f)
+                CURRENT_CTX_RESET[0] = True  # back to the standard context for whatever comes next
+                continue
+
+            if test == "cache_long":
+                # the ag_cache test with an agent-app sized prefix (Hermes sends about 55k tokens before the first message)
+                want = CFG["cache_long_tokens"]
+                if not c.ensure(ctx):
+                    finish(m, test, rep, {"error": "could not load at standard context"}, ok=False); continue
+                if (c.ctx or ctx) < want + 2048:
+                    finish(m, test, rep, {"skipped": f"standard context {c.ctx or ctx} too small for a {want}-token prefix"}, ok=True); continue
+                def f(rep=rep, want=want):
+                    nonce = f"[session {seed_for(c.key, 'cache_long', rep, time.time()) % 10**8}]"
+                    kb = filler(int(max(1000, want - 13500) * c.ratio), seed_for(c.key, "kb_long", rep))
+                    sysmsg = nonce + "\n" + A.BIG_SYSTEM + "\n\n# Project knowledge base\n" + kb
+                    tools = copy.deepcopy(A.task_tools(A.TASK_BY_ID["ag_big_toolset"]))
+                    tools[0]["function"]["description"] = nonce + " " + tools[0]["function"]["description"]
+                    base, ex = [{"role": "system", "content": sysmsg}], {"tools": tools}
+                    q1 = base + [{"role": "user", "content": "Reply with just the word OK."}]
+                    a = L.chat_stream(c.ident, q1, max_tokens=16, extra=ex, timeout=3600)
+                    if a.get("error"):
+                        return False, {"error": a["error"], "target_tokens": want}
+                    b = L.chat_stream(c.ident, base + [{"role": "user", "content": "Reply with just the word READY."}], max_tokens=16, extra=ex, timeout=3600)
+                    d = L.chat_stream(c.ident, q1 + [{"role": "assistant", "content": "OK"}, {"role": "user", "content": "Thanks. Now reply with just the word DONE."}],
+                                      max_tokens=16, extra=ex, timeout=3600)
+                    t_ = lambda x: x.get("ttft") or x.get("t_total")
+                    return True, {"prompt_tokens": a.get("prompt_tokens"), "target_tokens": want, "cold_ttft": t_(a), "warm_ttft": t_(b), "cont_ttft": t_(d),
+                                  "speedup": round(t_(a) / t_(b), 2) if t_(a) and t_(b) else None, "ctx": c.ctx,
+                                  "errors": [x.get("error") for x in (b, d) if x.get("error")]}
+                run_with_retry(m, test, rep, f)
+                continue
+
             if test == "ag_cache":
                 def f(rep=rep):
                     # an agent-framework sized prefix (system prompt + 40 tools + project notes, ~12k tokens);
@@ -749,7 +1008,7 @@ def run_model(m, max_phase=2):
                 run_with_retry(m, test, rep, f)
                 continue
 
-            if test.startswith(("ag:", "fx:")):
+            if test.startswith(("ag:", "fx:", "hx:")):
                 t = A.TASK_BY_ID.get(test[3:])
                 base_rec = {"cat": t["cat"] if t else None, "score": 0.0, "solved": False, "grader_v": A.version(t) if t else None}
                 if not t:
@@ -932,7 +1191,7 @@ def run_judges(models):
     for r in res:
         if r.get("type") == "judge":
             have.setdefault((r["model"], r["task"]), set()).add(r["judge"])
-    keys = [m["key"] for m in models if not m["type"].startswith("embed")]
+    keys = [m["key"] for m in models if not m["type"].startswith("embed") and not m["key"].endswith("@omlx")]
     judges = []
     for kw in CFG["judges"]:
         k = next((k for k in keys if kw in k.lower()), None)
@@ -1239,6 +1498,22 @@ def main():
                 log(f"download queue error: {e}")
             allm = alias_keys(expand_variants(L.list_models()))
             models = eligible(allm)
+            om = omlx_variants(models)
+            models += om
+            # After oMLX has run, LM Studio's normal MLX engine fails to load ("FileNotFoundError" from a deleted working
+            # directory) until LM Studio restarts. So normal MLX rows wait until every oMLX row is finished; then Hugo
+            # restarts LM Studio once (data/mlx_hold.txt says so) and they run without further engine switches.
+            _dn = done_set() if om else None
+            if (om and any(pending(m, _dn) for m in om)) or os.path.exists(os.path.join(DATA, "mlx_hold.txt")):
+                _dn = _dn or done_set()
+                held = [m for m in models if not m.get("engine") and not m["type"].startswith("embed")
+                        and "gguf" not in (m.get("format") or "").lower() and not (m.get("path") or "").lower().endswith(".gguf")
+                        and pending(m, _dn)]
+                if held:
+                    models = [m for m in models if m not in held]
+                    if not any(pending(m, _dn) for m in om) and not getattr(main, "_hold_logged", False):
+                        log("oMLX rows finished; normal MLX rows wait for an LM Studio restart (delete data/mlx_hold.txt after it)")
+                        main._hold_logged = True
             try:
                 inv = [{"key": m["key"], "type": m["type"], "format": m["format"], "size_gb": round((m.get("size_bytes") or 0) / 1e9, 1),
                         "max_ctx": m.get("max_ctx"), "vision": m.get("vision"), "arch": m.get("arch"),
@@ -1258,7 +1533,7 @@ def main():
             except Exception as e:  # noqa
                 log(f"delete-after-testing error: {e}")
             phase, todo = 0, []
-            for ph in (0, 1, 2, 3, 4):
+            for ph in range(LAST_PHASE + 1):
                 todo = [m for m in models if pending(m, done, ph)]
                 if todo:
                     phase = ph
@@ -1271,18 +1546,40 @@ def main():
                 todo.sort(key=lambda m: (m["type"].startswith("embed"), prio(m["key"]), m.get("size_bytes") or 0))
             else:  # smallest first, so the agent leaderboard fills in quickly
                 todo.sort(key=lambda m: m.get("size_bytes") or 0)
+            # config defer_keywords: these models only run when nothing else is pending
+            dk = [x.lower() for x in CFG.get("defer_keywords") or []]
+            if dk and not ARGS.smoke:
+                rest = [m for m in todo if not any(x in m["key"].lower() for x in dk)]
+                if rest:
+                    todo = rest
+            # config final_models: the picks run first, phase group by phase group (see DEFAULTS)
+            phases = None
+            fin = [m for m in models if final_model(m)] if not ARGS.smoke else []
+            fin_run = None
+            for grp in (CFG.get("final_phase_groups") or []) if fin else []:
+                ft = [m for m in fin if pending(m, done, LAST_PHASE, set(grp))]
+                if ft:
+                    fin_run = (sorted(ft, key=lambda m: m.get("size_bytes") or 0), set(grp))
+                    break
             # config priority_small_gb: models up to that size finish every phase (one load each) before bigger ones continue
             small_gb = CFG.get("priority_small_gb") or 0
-            small = [m for m in models if small_gb and (m.get("size_bytes") or 0) <= small_gb * 1e9 and pending(m, done, 4)]
-            if small and not ARGS.smoke:
+            small = [m for m in models if small_gb and (m.get("size_bytes") or 0) <= small_gb * 1e9 and pending(m, done, LAST_PHASE)
+                     and not any(x in m["key"].lower() for x in dk)]
+            if fin_run:
+                todo, phase, phases = fin_run[0], LAST_PHASE, fin_run[1]
+                if not getattr(main, "_fin_logged", None) == str(sorted(phases)):
+                    log(f"final push: {len(todo)} pick(s) with phases {sorted(phases)} pending, running them first")
+                    main._fin_logged = str(sorted(phases))
+            elif small and not ARGS.smoke:
                 # brand-new small models (base tests still pending) first, then smallest first
-                todo, phase = sorted(small, key=lambda m: (not pending(m, done, 0), m.get("size_bytes") or 0)), 4
+                todo, phase = sorted(small, key=lambda m: (not pending(m, done, 0), m.get("size_bytes") or 0)), LAST_PHASE
             elif not ARGS.smoke:
                 # next, models that get deleted once tested: finishing them frees disk for the waiting downloads
-                cl = [m for m in models if m["key"] in cleanup_keys() and pending(m, done, 4)]
+                cl = [m for m in models if m["key"] in cleanup_keys() and pending(m, done, LAST_PHASE)]
                 if cl:
-                    todo, phase = sorted(cl, key=lambda m: m.get("size_bytes") or 0), 4
+                    todo, phase = sorted(cl, key=lambda m: m.get("size_bytes") or 0), LAST_PHASE
             if not todo:
+                ensure_mlx_engine(False)
                 if not ARGS.no_judge and not ARGS.smoke:
                     wait_slot(first); first = False
                     run_judges(models)
@@ -1303,7 +1600,11 @@ def main():
             wait_downloads()
             wait_slot(first); first = False
             maybe_restart()
-            run_model(todo[0], phase)
+            run_model(todo[0], phase, phases)
+            if todo[0].get("engine") == "omlx":
+                L.unload_all()
+                ensure_mlx_engine(False)
+                clear_omlx_cache(f"after {todo[0]['key']}")
             report.build()
         except Paused as p:
             log(f"paused: {p}. Unloading and waiting.")

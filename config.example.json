@@ -7,5 +7,9 @@
   "download_wait_max_min": 0,
   "linger_after_done_h": 6,
   "priority_small_gb": 0,
-  "repo_url": "https://github.com/DesignwithHugo/LocalLlmBench"
+  "repo_url": "https://github.com/DesignwithHugo/LocalLlmBench",
+  "full_context_models": [],
+  "final_models": [],
+  "final_fx_trials": 3,
+  "omlx_models": []
 }

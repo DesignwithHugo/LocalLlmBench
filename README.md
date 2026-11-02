@@ -2,7 +2,7 @@
 
 An unattended benchmark for every model in your LM Studio library on an Apple Silicon Mac. It loads one model at a time, measures speed, memory and context, runs a small quality set, then puts each model to work as an **agent** in a simulated workspace and grades what actually happened. Python standard library only; nothing leaves your Mac (the optional download queue asks LM Studio to fetch models, nothing else).
 
-**Results so far:** [M1 Max 64 GB, October 2026](results/m1-max-64gb/README.md): 63 models, 60 of them through the full agent suite and the real-world failure tier, three runs each.
+**Results so far:** [M1 Max 64 GB, November 2026](results/m1-max-64gb/README.md): 75 rows (63 distinct models plus quant and engine variants), 70 of them through the full agent suite and the real-world failure tier, three runs each and ten for the picks. It opens with [What to run](results/m1-max-64gb/README.md#what-to-run) and a [How to choose](results/m1-max-64gb/README.md#how-to-choose) guide by Mac RAM and use.
 
 ## Why
 
@@ -28,6 +28,8 @@ Without `--now` it waits until the Mac has been idle for 15 minutes and stays in
 - **Quality:** 26 small tasks (21 text, 5 vision): instruction following, JSON extraction, single tool calls, Python with unit tests, reasoning, Spanish writing and summaries, OCR, charts, UI reading. Auto-graded; writing is also scored by two local judge models from a different family.
 - **Agents:** 16 multi-step tool-use tasks, 3 runs each at temperature 0.6 with fixed seeds. Covers multi-step chains, error recovery, not inventing data when a tool is down, choosing among 40 tools, parallel calls, asking when ambiguous, multi-turn edits, prompt injection, drafting vs sending, long inputs and outputs, a coding loop with tests, and strict schemas.
 - **Real-world failure tier:** 10 agent tasks rebuilt (anonymized) from real assistant mistakes, with a count of "serious slips" (hard-to-undo actions or false claims).
+- **Hard tier:** 3 harder agent tasks added in November (rolling back your own half-done change, pointing out a contradiction between an instruction and the context, reconciling a 40-line delivery against a purchase order). Still a probe, not a score.
+- **Full context (picks only):** one fill at the largest context the model loads (up to 1M tokens), and a prompt-cache run with a 55k-token prefix, the size an agent app's system prompt reaches.
 - **Prompt cache:** a ~12k-token agent prefix sent cold, then reused.
 - **Embeddings:** speed and a simple retrieval check.
 
@@ -39,6 +41,9 @@ Half the tasks are in Spanish.
 2. Agent suite, first pass, smallest model first.
 3. Agent reliability runs (two more per task), so "solved every time" can be computed.
 4. Real-world tier, first pass then reliability runs.
+5. Hard tier, first pass then reliability runs.
+
+`final_models` in `config.json` (exact keys) makes a few picks run first, with `final_fx_trials` runs per real case instead of three, so the models you actually use get the tightest numbers. `full_context_models` (key fragments) adds the full-window fill and the 55k-prefix cache run for those models; plan for an hour or more per 27B model at 256k. `omlx_models` runs MLX models a second time on LM Studio's oMLX engine as separate rows; it is empty by default (see the results README for why).
 
 You can stop after step 2 and still have a full agent leaderboard. Models up to `priority_small_gb` finish every phase before bigger ones continue.
 

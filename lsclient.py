@@ -545,7 +545,13 @@ def environment():
     except Exception:
         pass
     try:
-        env["engines"] = json.load(open(os.path.join(HOME, ".lmstudio/.internal/backend-preferences-v1.json")))
+        p2 = os.path.join(HOME, ".lmstudio/.internal/backend-preferences-v2.json")
+        if os.path.exists(p2):  # LM Studio 0.4.27+
+            d2 = json.load(open(p2))
+            env["engines"] = [{"model_format": f, "name": n, "version": (d2.get("versions") or {}).get(n)}
+                              for f, n in (d2.get("formatDefaults") or {}).items()]
+        else:
+            env["engines"] = json.load(open(os.path.join(HOME, ".lmstudio/.internal/backend-preferences-v1.json")))
     except Exception:
         pass
     return env
